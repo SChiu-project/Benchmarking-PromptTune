@@ -14,7 +14,7 @@ Do not upload the ZIP as a single repository file. Upload or push its extracted 
 
 1. In Vercel, choose **Add New → Project** and import that GitHub repository.
 2. Use framework **Next.js**, Node.js **24.x**, and the repository root as Root Directory.
-3. Keep the install/build settings supplied by `vercel.json`: `pnpm install --frozen-lockfile` and `pnpm build`. Keep the Output Directory override **unset**; Next.js supplies it. Vercel runs the generated Functions and Workflow routes, not `pnpm start` or a persistent local worker.
+3. Keep the install/build settings supplied by `vercel.json`: `pnpm install --frozen-lockfile` and `pnpm build`. Keep the Output Directory override **unset** (Next.js defaults to `.next`), or use `.next` if an override is required. Do not set it to `.next-production`. Vercel runs the generated Functions and Workflow routes, not `pnpm start` or a persistent local worker.
    `vercel.json` also sets an internal hosted-mode flag so database/auth protection cannot silently fall back to local mode when system variables are missing.
 
 4. Under project settings, enable **access to System Environment Variables**. Workflow needs Vercel's deployment identity at build and runtime. Do not manually set `VERCEL`, `VERCEL_DEPLOYMENT_ID`, or `WORKFLOW_TARGET_WORLD`.
@@ -74,3 +74,9 @@ The importer requires an empty destination workspace and rejects active source r
 ## What has and has not been verified
 
 The production Workflow build, isolated PostgreSQL SQL tests, mock-service durable queue HTTP smoke test, and local regression suite can be run without a cloud account. Actual GitHub Actions execution, hosted PostgreSQL network connectivity, Vercel OIDC/queue dispatch, and the public HTTPS deployment require your connected project and must be checked after deployment. See `COMPLETION.md` for the checks actually run during preparation.
+
+## Fixing NEXT_OUTPUT_DIR_MISSING
+
+If your log shows a successful Next.js build followed by Vercel looking for `/vercel/path0/.next`, use the corrected `next.config.ts` from this package. The earlier package set a custom `.next-production` directory, which did not match the deployment collector's expected `.next` path. The corrected configuration uses the Next.js default; the build command now verifies `.next/BUILD_ID` and the deployment manifests.
+
+Push the corrected files to GitHub, check that Vercel's Framework Preset is **Next.js**, leave its Output Directory override off (or `.next`), and redeploy the new commit without the previous build cache. Root Directory must be the folder containing `package.json`. This fixes the reported output-folder failure; a successful live deployment still needs to be confirmed in Vercel.
