@@ -1,0 +1,13 @@
+.git
+.tools
+node_modules
+.next
+.next-production
+data
+.env*
+!.env.example
+tests
+COMPLETION.md
+Start Benchmark.command
+github-ready
+*.zip

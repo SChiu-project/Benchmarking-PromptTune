@@ -1,3 +1,4 @@
+import { isVercel } from "@/lib/runtime";
 import type { Metadata } from "next";
 import { Shell } from "@/components/shell";
 import "./globals.css";
@@ -9,7 +10,7 @@ export default function Layout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <Shell>{children}</Shell>
+        <Shell hosted={isVercel()}>{children}</Shell>
       </body>
     </html>
   );

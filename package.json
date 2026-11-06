@@ -4,7 +4,7 @@
   "private": true,
   "packageManager": "pnpm@10.28.2",
   "engines": {
-    "node": ">=22.0.0"
+    "node": "24.x"
   },
   "scripts": {
     "dev": "node scripts/launch.mjs dev",
@@ -12,20 +12,27 @@
     "build": "next build --webpack",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:workflow": "node scripts/workflow-smoke.mjs",
+    "deploy:check": "node scripts/deployment-check.mjs",
+    "data:import": "tsx scripts/import-local-data.ts",
+    "package:github": "python3 scripts/package-github.py"
   },
   "dependencies": {
     "csv-parse": "7.0.3",
     "dotenv": "18.0.9",
     "lucide-react": "1.70.0",
     "next": "16.4.5",
+    "postgres": "4.1.0",
     "proper-lockfile": "4.1.2",
     "react": "19.3.1",
     "react-dom": "19.3.1",
     "tsx": "4.23.15",
+    "workflow": "5.4.0",
     "zod": "4.6.7"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "0.5.15",
     "@types/node": "26.6.6",
     "@types/proper-lockfile": "4.1.4",
     "@types/react": "19.3.0",

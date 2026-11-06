@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { isVercel } from "./runtime";
 import { ConflictError } from "./store";
 export function fail(error: unknown) {
   if (error instanceof z.ZodError)
@@ -16,7 +17,7 @@ export function fail(error: unknown) {
     return Response.json({ error: "Invalid JSON." }, { status: 400 });
   console.error("Request failed:", error);
   return Response.json(
-    { error: "Request failed. Check the local server console." },
+    { error: "Request failed. Check the server logs." },
     { status: 500 },
   );
 }
@@ -25,7 +26,24 @@ export function localRequest(req: Request) {
     host = req.headers.get("host");
   if (origin && new URL(origin).host !== host)
     throw new ConflictError("Cross-origin requests are not allowed.");
+  if (isVercel() && host) {
+    const trusted = [
+      process.env.APP_URL,
+      process.env.VERCEL_URL,
+      process.env.VERCEL_PROJECT_PRODUCTION_URL,
+    ]
+      .filter(Boolean)
+      .map(
+        (value) =>
+          new URL(value!.includes("://") ? value! : `https://${value}`).host,
+      );
+    if (!trusted.includes(host))
+      throw new ConflictError(
+        "Unrecognized application host. Set APP_URL for custom domains.",
+      );
+  }
   if (
+    !isVercel() &&
     host &&
     !["127.0.0.1", "localhost", "[::1]"].includes(host.replace(/:\d+$/, ""))
   )
@@ -34,8 +52,8 @@ export function localRequest(req: Request) {
 export async function jsonBody(req: Request) {
   localRequest(req);
   const text = await req.text();
-  if (Buffer.byteLength(text) > 10 * 1024 * 1024)
-    throw new ConflictError("Request exceeds 10 MB.");
+  if (Buffer.byteLength(text) > 4 * 1024 * 1024)
+    throw new ConflictError("Request exceeds 4 MB.");
   return JSON.parse(text) as unknown;
 }
 export function recordSummary<

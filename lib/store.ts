@@ -10,6 +10,8 @@ import {
   type Run,
   type CreateRun,
 } from "./schema";
+import { databaseMode, workflowMode, isVercel } from "./runtime";
+import { databaseTransaction } from "./postgres-store";
 import { searchConfig } from "./doc-search";
 export const dataDir = () =>
   process.env.DATA_DIR || path.join(process.cwd(), "data");
@@ -17,6 +19,7 @@ export class ConflictError extends Error {}
 export async function transaction<T>(
   fn: (state: State) => T | Promise<T>,
 ): Promise<T> {
+  if (databaseMode()) return databaseTransaction(fn);
   const dir = dataDir();
   await mkdir(dir, { recursive: true });
   const release = await lockfile.lock(path.join(dir, "state.json"), {
@@ -101,6 +104,10 @@ export function recover(s: State) {
 export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
   const body = createRunSchema.parse(input),
     config = configSchema.parse(searchConfig());
+  if (isVercel() && config.timeoutMs > 180000)
+    throw new ConflictError(
+      "Hosted Doc Search timeout must not exceed 180000 ms.",
+    );
   const requestHash = createHash("sha256")
     .update(
       JSON.stringify({
@@ -164,10 +171,17 @@ export async function retryEvaluation(id: string) {
       throw new ConflictError(
         "Only saved successful answers can be evaluated.",
       );
+    if (workflowMode() && run.status === "active")
+      throw new ConflictError(
+        "Wait until this run finishes before retrying its evaluation.",
+      );
     if (["pending", "running"].includes(record.evaluationStatus))
       throw new ConflictError("Evaluation is already queued.");
     if (s.runs.some((r) => r.status === "active" && r.id !== run.id))
       throw new ConflictError("Another run is active. Wait for it to finish.");
+    run.generation = (run.generation ?? 0) + 1;
+    delete run.workflowRunId;
+    delete run.dispatchError;
     record.evaluationStatus = "pending";
     delete record.evaluation;
     delete record.evaluationReason;

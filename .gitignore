@@ -8,3 +8,11 @@ test-results/
 playwright-report/
 *.tsbuildinfo
 .DS_Store
+.vercel/
+.workflow-data/
+app/.well-known/workflow/
+github-ready/
+*.zip
+*.pem
+*.key
+/.swc

@@ -1,3 +1,4 @@
+import { dispatchRun } from "@/lib/dispatch";
 import { createRun } from "@/lib/store";
 import { questionSchema } from "@/lib/schema";
 import { fail, jsonBody } from "@/lib/http";
@@ -9,19 +10,16 @@ export async function POST(req: Request) {
       .object({ question: questionSchema, idempotencyKey: z.uuid() })
       .strict()
       .parse(await jsonBody(req));
-    return Response.json(
+    const id = await createRun(
       {
-        id: await createRun(
-          {
-            questions: [body.question],
-            idempotencyKey: body.idempotencyKey,
-            concurrency: 1,
-          },
-          "test",
-        ),
+        questions: [body.question],
+        idempotencyKey: body.idempotencyKey,
+        concurrency: 1,
       },
-      { status: 202 },
+      "test",
     );
+    await dispatchRun(id);
+    return Response.json({ id }, { status: 202 });
   } catch (e) {
     return fail(e);
   }

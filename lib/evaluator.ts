@@ -1,3 +1,4 @@
+import { isVercel } from "./runtime";
 import { z } from "zod";
 import {
   dimensionNames,
@@ -20,7 +21,7 @@ export function evaluatorConfig() {
           .number()
           .int()
           .min(100)
-          .max(300000)
+          .max(isVercel() ? 180000 : 300000)
           .parse(process.env.EVALUATOR_TIMEOUT_MS || 60000),
       }
     : null;

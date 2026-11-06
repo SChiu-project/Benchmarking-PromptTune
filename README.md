@@ -1,10 +1,12 @@
 # Doc Search Benchmark
 
-A localhost benchmark workspace built with Next.js App Router, React, strict TypeScript, Zod, and pnpm. Upload → review → test connectivity → run → inspect → grade saved answers.
+A benchmark workspace for uploading test questions, calling Doc Search, inspecting answers/sources/traces, and grading fulfillment with a separate LLM. Built with Next.js App Router, React, strict TypeScript, Zod, and pnpm.
 
-## Start
+**Hosting on Vercel:** follow [DEPLOYMENT.md](DEPLOYMENT.md). The hosted mode uses PostgreSQL and durable Vercel Workflows. Local mode keeps JSON storage and the independent process worker. The fulfillment explanation column works with existing saved evaluations.
 
-Install Node.js 22+ (24 LTS recommended) and pnpm 10.28.2. From this folder:
+## Local start
+
+Node.js 24.x and pnpm 10.28.2:
 
 ```sh
 pnpm install --frozen-lockfile
@@ -12,81 +14,80 @@ cp .env.example .env.local
 pnpm dev
 ```
 
-Open http://127.0.0.1:3000. One command starts the queue worker and web server, bound to `127.0.0.1`. Stop with Ctrl+C. This checkout also has a `Start Benchmark.command` launcher that uses the project-local development tools installed during implementation if system tools are unavailable. No authentication, deployment, cloud storage, or database is included.
+Open http://127.0.0.1:3000. `pnpm dev` starts the web server and local queue worker. The existing `Start Benchmark.command` launcher can use the project-local tools installed on the original Mac checkout. The clean GitHub export omits those installed tools, so a fresh checkout needs Node and pnpm installed normally.
 
-`pnpm build` creates `.next-production/`; `pnpm start` serves that build with the same worker. Development uses a separate `.next/` directory. Run one application instance per data directory. Worker lock conflicts cause startup to fail safely.
+Leave `DATABASE_URL` and `JOB_BACKEND` unset for the original local JSON/process mode. `pnpm build` writes `.next-production`; `pnpm start` serves that build locally with the same queue worker. The dev server uses `.next`.
 
-## Configuration
+## Environment
 
-All variables below are **server-only**. Use `.env.local` (takes precedence) or `.env`. Restart the app after changing settings. Never prefix secrets with `NEXT_PUBLIC_` or `VITE_`.
+Use ignored `.env.local` or `.env`, and restart after changes. Configuration is server-only.
 
-| Variable                | Purpose                                                                                      |
-| ----------------------- | -------------------------------------------------------------------------------------------- |
-| `DOC_SEARCH_ENDPOINT`   | Full POST URL; defaults to the endpoint in the brief                                         |
-| `DOC_SEARCH_PROJECT_ID` | Defaults to `mtr-air-kiosk-05emf61`                                                          |
-| `DOC_SEARCH_TIMEOUT_MS` | 60000 by default, 100–300000 allowed                                                         |
-| `EVALUATOR_ENDPOINT`    | Full OpenAI-compatible chat completions URL, including `/v1/chat/completions` as appropriate |
-| `EVALUATOR_MODEL`       | Provider model ID                                                                            |
-| `EVALUATOR_API_KEY`     | Bearer credential; never returned to the browser                                             |
-| `EVALUATOR_TIMEOUT_MS`  | 60000 by default, 100–300000 allowed                                                         |
-| `DATA_DIR`              | Optional absolute storage directory; defaults to `./data`                                    |
-| `PORT`                  | 3000 by default                                                                              |
+| Variable                       | Purpose                                                                    |
+| ------------------------------ | -------------------------------------------------------------------------- |
+| `DOC_SEARCH_ENDPOINT`          | Full POST endpoint; defaults to the service in the brief                   |
+| `DOC_SEARCH_PROJECT_ID`        | Defaults to `mtr-air-kiosk-05emf61`                                        |
+| `DOC_SEARCH_TIMEOUT_MS`        | 60000 default; hosted recommended maximum 180000                           |
+| `EVALUATOR_ENDPOINT`           | Full OpenAI-compatible chat-completions URL                                |
+| `EVALUATOR_MODEL`              | Model ID                                                                   |
+| `EVALUATOR_API_KEY`            | Bearer credential                                                          |
+| `EVALUATOR_TIMEOUT_MS`         | 60000 default; hosted recommended maximum 180000                           |
+| `DATA_DIR`                     | Local JSON storage directory; defaults to `./data`                         |
+| `PORT`                         | Local server port; defaults to 3000                                        |
+| `DATABASE_URL`                 | PostgreSQL connection URL; required on Vercel, optional locally            |
+| `APP_PASSWORD`, `APP_USERNAME` | Shared workspace Basic auth; password required on Vercel, optional locally |
+| `APP_URL`                      | Full HTTPS address for a custom hosted domain                              |
+| `BENCHMARK_NAMESPACE`          | Database workspace override; production/previews otherwise separate        |
+| `JOB_BACKEND`                  | Optional `workflow` to test durable execution locally                      |
 
-Your supplied proxy’s published usage examples confirm OpenAI chat format with bearer authentication and `/v1/chat/completions`. The supplied settings were mapped into this checkout’s ignored `.env.local`; the original files were not changed. `#usage` is a documentation anchor, not an API path. This adapter requires JSON mode (`response_format: {type: "json_object"}`) and a text response in `choices[0].message.content`. Configure another provider only if it supports that contract. No automatic model substitution occurs.
+The evaluator supports bearer authentication, JSON mode, and a JSON string in `choices[0].message.content`. Missing settings or criteria skip grading with a reason. **Retry evaluation** grades saved answers without rerunning Doc Search, preserving attempt history. Invalid model output is a grading failure. Credentials are never browser props or committed source.
 
-Missing evaluator configuration keeps search operational and marks grading skipped with a reason. With configuration supplied, use **Retry evaluation** in record details to grade a saved answer, preserving prior attempt history without another Doc Search call. A malformed model output is a grading failure, never a score. Missing criteria are skipped as well.
+## Upload and results
 
-## CSV and review
+Columns: required `query`; optional `folder`, `expected_answer`, `evaluation_comments`. Download `public/example.csv`. UTF-8, BOM, quoted commas, escaped quotes and multiline fields are supported. Unknown/duplicate/missing headers are errors. Maximum 1,000 input data rows; local upload limit 5 MB, hosted limit 1 MB. Oversized review/request payloads are rejected with an actionable error.
 
-Download `public/example.csv` from the UI. Columns: required `query`; optional `folder`, `expected_answer`, `evaluation_comments`. Unknown, duplicate, and missing headers are validation errors. UTF-8/BOM, quoted commas, escaped quotes, and multiline fields are supported. Limit: 5 MB / 1,000 input data rows per upload.
+Headers and values are trimmed; empty queries are counted/skipped. An empty folder becomes `Codex_Benchmark_tool` before exact, case-sensitive deduplication using JSON tuple keys. The first occurrence wins. Conflicting duplicate criteria block starting until explicitly resolved or corrected in a reupload. Identical queries in different folders remain; previous runs are never deduplicated.
 
-Headers/values are trimmed. Empty queries are counted and skipped, including physically blank lines. Empty folders resolve to `Codex_Benchmark_tool` **before** exact, case-sensitive query/folder deduplication. Pairs use JSON tuple keys to prevent delimiter collisions. The first duplicate wins; identical queries in different folders are retained. Conflicting duplicate references/comments block starting until the user explicitly keeps the first criteria or edits/reuploads the CSV. Repeat runs are never deduplicated against history.
+Review shows row/folder counts, preview, errors/conflicts, a separate first-query test, and concurrency 1–5 (default 3). Starting a batch still runs every retained question. A connectivity test uses the same concurrency/storage protections but is hidden from benchmark history.
 
-The review shows all row counts, resolved folder counts, preview, errors/conflicts, test result, and concurrency. The first-query connectivity test is an independent saved test job, hidden from benchmark history; batch creation still includes every retained question. Tests share the same global worker limits and cannot run beside an active batch.
+Runs show terminal search progress, separate execution/grading counts, and averages. Records support run/folder/status filters, full-dataset query search, pagination, score explanations and expandable dimension weights/evidence. Details include full answers, references/comments, sources/metadata, raw JSON, timing, trace copy, discrepancies and evaluation history. Text renders as plain React text; source links allow HTTP(S) only.
 
-## Queues, persistence, and restart behavior
+## Execution and persistence
 
-- A separate `tsx` Node worker owns both queues; browser navigation, tab closure, and Next.js hot reload do not stop them. Worker code changes require a full restart.
-- One active run (or connectivity test) per data directory. Search concurrency is strictly capped at the selected 1–5; grading has its own cap of 2. Failures do not stop the other questions.
-- Run/record IDs, criteria, search configuration, and queued state are saved before dispatch. Browser submission keys prevent accidental duplicate batches and are checked against a payload hash. The API responds promptly with a run ID; UI polling tracks progress.
-- `data/state.json` stores validated run/record snapshots and raw responses. Each operation uses a cross-process filesystem lock; unchanged reads and idle queue ticks do not rewrite the state; writes use private temporary files, fsync, and atomic rename. Internal filenames never contain uploaded query/folder text. A separate worker lease prevents a second processor.
-- Completed search responses are committed before evaluation becomes eligible. HTTP, network, timeout, invalid JSON, and schema failures are recorded independently of grading. Failed requests preserve available raw request/response data.
-- After a full server restart, queued/running searches become **interrupted**, unfinished evaluations become **skipped**, and in-flight grading attempts become failed. Successful answers remain available. Nothing is silently resent. A stale lease after a hard crash can take approximately 10–15 seconds to expire.
-- Timed-out Doc Search POSTs are **never automatically retried**, because remote delivery is ambiguous. Make an intentional new batch to run them again. Evaluation retries also require an explicit action.
-- `.gitignore` excludes runtime data, dependencies, build output, tools, and local environment/secrets. Keep the local data folder if you want history to survive restarting. Back it up only while the app is stopped.
+- One active run or connectivity test per workspace. Search concurrency is strictly capped at 1–5; grading has an independent maximum of 2. One failure does not stop other questions.
+- Questions, criteria, generated IDs, configuration, and queued records are persisted before dispatch. Submission keys/payload hashes prevent accidental duplicate batches. UI polling is independent of execution.
+- Local mode uses private, fsynced, atomically replaced JSON snapshots with cross-process locks. The process worker continues through browser navigation/tab closure and Next hot reload. A full worker restart marks unfinished searches interrupted, unfinished evaluations skipped, and interrupted attempts failed; it never silently resends them.
+- Hosted mode uses a PostgreSQL JSONB snapshot, database transactions and advisory/row locks, plus Vercel Workflows. Functions can restart without losing state. Search answers are committed before grading is released. Workflow logs carry IDs rather than full uploaded answers/credentials. Work is signaled between search/evaluator lanes, avoiding routine per-record readiness polling.
+- Retries of durable transport/steps cannot resend a dispatched Doc Search POST: persisted record state gates each external call. Unconfirmed running work waits for its lease, then becomes interrupted. Ambiguous external POST timeouts are never automatically repeated. A new search requires an intentional new batch.
+- Completed answers survive queue interruptions. Explicit evaluation retries create a new generation; older workflow generations cannot overwrite it. Retry grading after the run finishes. Dispatch/recovery controls are described in the deployment guide.
 
-This is a single-machine MVP: state is a single atomic JSON snapshot, not an indexed database. Large histories make list/poll operations slower; archive data while stopped if needed. File corruption or invalid stored schemas fail closed and appear as a server error; data is not silently replaced.
+State is one atomic snapshot per workspace, suitable for a single-workspace MVP rather than unlimited history. Large histories increase parsing/transaction cost. Invalid saved schemas fail closed. Back up local data only while stopped; use your database provider's backups for hosted data. `.gitignore` excludes credentials, runs, tools, generated Workflow routes, deployment metadata and build output.
 
-## Observed Doc Search adapter
+## Response adapter and scoring
 
-A real sample POST succeeded on 6 November 2026. The complete observed response is captured in `tests/fixtures/doc-search.observed.json` (a live capture used **only as a deterministic test fixture**, never served as a benchmark answer).
+The live sample was observed on 6 November 2026. `tests/fixtures/doc-search.observed.json` is a **sanitized excerpt** of that response for deterministic mapping tests; corpus/configuration inventory and original trace identifiers are omitted. It is not served as a live answer.
 
-- Answer: concatenated `message.series[].text`.
-- Trace: optional `langsmith_trace_id`; missing/empty is unavailable.
-- Sources: `used_sections`, preserving passage content and source metadata. Counts are retrieved **passages**, not unique documents or verified citations. `doc_names` is a corpus inventory and is not counted as sources.
-- Absent/unrecognized source arrays are unknown, displayed as “—”; an explicit recognized empty array is zero. An unexpected answer shape or `answering_failed` flag is an execution failure. Full raw JSON is retained.
+Answer mapping is `message.series[].text`; optional trace is `langsmith_trace_id`; sources are retrieved passages in `used_sections`. `doc_names` is corpus inventory and is not counted as sources. Missing/unrecognized source arrays are unknown (“—”); a recognized empty list is zero. Unexpected answer shapes and `answering_failed` become execution failures. Runtime raw responses are retained in protected local/database state.
 
-Uploaded and returned text is rendered as plain React text, not HTML. Source links only allow HTTP(S). Mutations reject cross-origin requests; the server binds loopback only. External requests go from the server to the configured services, with query/folder to Doc Search and query/reference/comments/answer to the evaluator. Saved state stays on this computer.
+Rubric `fulfillment-v1.0`: correctness 40%, coverage 30%, relevance/intent 20%, instruction compliance 10%. Each validated dimension is 0–100 or null/unassessable with an explanation. Application code renormalizes applicable weights and computes the weighted mean to one decimal. If nothing is assessable, grading is skipped rather than assigning zero.
 
-## Scoring and metrics
+Anchors: 0 no fulfillment/contradictory; 20 mostly wrong; 40 useful fragments/major gaps; 60 core partly satisfied; 80 mostly complete; 100 complete without material issues. **60 is an anchor, not a required mean.** Scores are not probabilities, curved distributions, or random values. For example, a correct toilet location without a required accessible route loses coverage points.
 
-Rubric version: `fulfillment-v1.0`. Correctness 40%, coverage 30%, relevance/intent 20%, explicit instruction compliance 10%. Validated dimension scores are 0–100 or `null` when unassessable, with an explanation. The application renormalizes only applicable weights and computes the weighted mean rounded to one decimal. If all dimensions are unassessable, grading is skipped and no score is shown.
+Evaluations include assessment, fulfilled/missing requirements, contradictions, unsupported claims, evidence-based discrepancies, improvements and limitations. Uploaded criteria and API text are untrusted data and cannot override evaluator/scoring instructions. Only observable differences are requested, not hidden reasoning. Model assessments remain fallible and should be spot-checked.
 
-Anchors: 0 no fulfillment/contradictory; 20 mostly incorrect; 40 useful fragments with major gaps; 60 core partly satisfied; 80 mostly correct/complete; 100 complete with no material errors. **60 is an anchor, not a required mean.** Scores are never curved, randomized, or described as probabilities. E.g., correct toilet location without a required accessible route loses coverage points.
+Progress counts terminal searches, including failed/interrupted records. Average latency uses successful search requests only, excluding queue wait/grading. Average score includes successfully graded records only; unscored records are not zero. A run stays active until both queues finish.
 
-Evaluation includes dimension explanations, assessment, fulfilled/missing requirements, contradictions, unsupported claims, evidence-based discrepancies, improvements, limitations, and versioned attempt history (model, endpoint, timestamps, result/error). Untrusted content is isolated in the data message and cannot override the system rubric; only observable answer/reference differences are requested. LLM grading remains fallible and merits human review.
-
-Run progress counts terminal searches, including failures/interruption. Latency averages use successful search round-trip time only, including response parsing, excluding queue wait and grading. Score averages use successfully graded records only. Unscored records are not zero; unavailable means “—”. Runs stay active while either queue has pending/running work. Execution failures, interruptions, and grading failures are separate counts.
-
-## Verification
+## Checks and packaging
 
 ```sh
+pnpm build
 pnpm typecheck
 pnpm lint
 pnpm test
-pnpm build
-# Optional real calls using configured services; may incur evaluator charges:
-pnpm exec tsx scripts/smoke.ts
+pnpm test:workflow
+pnpm deploy:check
+pnpm package:github
 ```
 
-Unit/integration tests use deterministic mocks and temporary storage, including real child-worker process restart tests. `scripts/smoke.ts` calls the real services, writes its local report to the OS temporary directory, and prints only status/metrics (never credentials). See `COMPLETION.md` for checks actually run and the browser verification limit.
+`test:workflow` uses a disposable local server, local mock upstream APIs, and temporary storage. It makes no live search/evaluator calls. `deploy:check` checks required hosted settings; it does not provision resources or prove live connectivity. `package:github` requires Python 3 and Git and produces a clean source folder plus ZIP, deliberately without the original local Git history.
+
+For an optional real service smoke test using your configured evaluator (which may incur charges), run `pnpm exec tsx scripts/smoke.ts`. Optional completed local history migration is available with `pnpm data:import`; see the deployment guide. Actual verification and remaining live-cloud checks are recorded in [COMPLETION.md](COMPLETION.md).

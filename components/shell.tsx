@@ -9,7 +9,13 @@ import {
   ArrowUpRight,
   Monitor,
 } from "lucide-react";
-export function Shell({ children }: { children: React.ReactNode }) {
+export function Shell({
+  children,
+  hosted = false,
+}: {
+  children: React.ReactNode;
+  hosted?: boolean;
+}) {
   const path = usePathname();
   return (
     <div className="workspace">
@@ -45,20 +51,25 @@ export function Shell({ children }: { children: React.ReactNode }) {
           <div className="note-icon">
             <Monitor size={17} />
           </div>
-          <strong>Your local workspace</strong>
+          <strong>
+            {hosted ? "Your hosted workspace" : "Your local workspace"}
+          </strong>
           <p>
-            Runs and responses stay
+            {hosted
+              ? "Runs and responses are saved"
+              : "Runs and responses stay"}
             <br />
-            on this computer.
+            {hosted ? "in your database." : "on this computer."}
           </p>
           <span className="local-tag">
-            <i /> localhost only
+            <i /> {hosted ? "Protected workspace" : "localhost only"}
           </span>
         </div>
         <div className="sidebar-footer">
           <span className="avatar">DS</span>
           <span>
-            Benchmark workspace<small>Local environment</small>
+            Benchmark workspace
+            <small>{hosted ? "Hosted environment" : "Local environment"}</small>
           </span>
           <ArrowUpRight size={14} />
         </div>
@@ -76,7 +87,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
             </strong>
           </div>
           <span className="environment">
-            <i /> Local environment
+            <i /> {hosted ? "Hosted environment" : "Local environment"}
           </span>
         </header>
         <main id="main-content">{children}</main>

@@ -134,6 +134,9 @@ export const runSchema = z.object({
   status: z.enum(["active", "completed", "interrupted"]),
   concurrency: z.number().int().min(1).max(5),
   config: configSchema,
+  generation: z.number().int().nonnegative().optional(),
+  workflowRunId: z.string().optional(),
+  dispatchError: z.string().optional(),
   records: z.array(recordSchema),
 });
 export type Run = z.infer<typeof runSchema>;
@@ -177,6 +180,8 @@ export function summarize(run: Run) {
     averageLatency: mean(successful.map((r) => r.result!.latencyMs)),
     averageScore: mean(scored.map((r) => r.evaluation!.score!)),
     scoredCount: scored.length,
+    dispatchError: run.dispatchError,
+    workflowRunId: run.workflowRunId,
   };
 }
 export type RunSummary = ReturnType<typeof summarize>;

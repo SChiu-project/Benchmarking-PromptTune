@@ -1,3 +1,4 @@
+import { dispatchRun } from "@/lib/dispatch";
 import { readState, createRun } from "@/lib/store";
 import { summarize, createRunSchema } from "@/lib/schema";
 import { fail, jsonBody, localRequest } from "@/lib/http";
@@ -19,6 +20,7 @@ export async function GET(req: Request) {
 export async function POST(req: Request) {
   try {
     const id = await createRun(createRunSchema.parse(await jsonBody(req)));
+    await dispatchRun(id);
     return Response.json({ id }, { status: 202 });
   } catch (e) {
     return fail(e);

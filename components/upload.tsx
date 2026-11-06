@@ -27,7 +27,8 @@ import {
   latency,
   date,
 } from "./common";
-export function UploadScreen() {
+export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
+  const maxMb = hosted ? 1 : 5;
   const router = useRouter(),
     input = useRef<HTMLInputElement>(null),
     submitting = useRef(false),
@@ -41,6 +42,7 @@ export function UploadScreen() {
     [starting, setStarting] = useState(false),
     [drag, setDrag] = useState(false),
     [recent, setRecent] = useState<RunSummary[]>([]),
+    [activeTest, setActiveTest] = useState<RunSummary | null>(null),
     [configured, setConfigured] = useState<boolean | null>(null),
     [testId, setTestId] = useState(""),
     [testing, setTesting] = useState(false),
@@ -49,6 +51,16 @@ export function UploadScreen() {
   useEffect(() => {
     let live = true;
     const refresh = () => {
+      api<{ evaluatorConfigured: boolean; activeTest: RunSummary | null }>(
+        "/api/status",
+      )
+        .then((s) => {
+          if (live) {
+            setConfigured(s.evaluatorConfigured);
+            setActiveTest(s.activeTest);
+          }
+        })
+        .catch(() => {});
       api<RunSummary[]>("/api/runs")
         .then((r) => {
           if (live) setRecent(r.slice(0, 3));
@@ -59,11 +71,6 @@ export function UploadScreen() {
     };
     refresh();
     const timer = setInterval(refresh, 2500);
-    api<{ evaluatorConfigured: boolean }>("/api/status")
-      .then((s) => {
-        if (live) setConfigured(s.evaluatorConfigured);
-      })
-      .catch(() => {});
     return () => {
       live = false;
       clearInterval(timer);
@@ -80,6 +87,10 @@ export function UploadScreen() {
         if (!live) return;
         const r = value.records[0];
         setTest(r);
+        if (value.summary.dispatchError) {
+          setTestError(value.summary.dispatchError);
+          setTesting(false);
+        }
         if (value.summary.status !== "active") {
           setTesting(false);
           setTestId("");
@@ -101,8 +112,8 @@ export function UploadScreen() {
   }, [testId]);
   async function upload(file: File) {
     setError("");
-    if (file.size > 5 * 1024 * 1024) {
-      setError("Choose a CSV smaller than 5 MB.");
+    if (file.size > maxMb * 1024 * 1024) {
+      setError(`Choose a CSV smaller than ${maxMb} MB.`);
       return;
     }
     setLoading(true);
@@ -180,6 +191,37 @@ export function UploadScreen() {
         <p>Turn your test questions into a clear picture of answer quality.</p>
       </div>
       <ErrorBox message={!review ? error : ""} />
+      {activeTest && !review && (
+        <div className="alert info">
+          A connectivity test is active.{" "}
+          {activeTest.dispatchError ||
+            "It continues independently of this page."}{" "}
+          {activeTest.dispatchError && (
+            <button
+              className="button secondary small"
+              onClick={() =>
+                void api(`/api/runs/${activeTest.id}/dispatch`, {
+                  method: "POST",
+                }).catch((e) => setError(e.message))
+              }
+            >
+              Retry queue dispatch
+            </button>
+          )}{" "}
+          {activeTest.workflowRunId && (
+            <button
+              className="button secondary small"
+              onClick={() =>
+                void api(`/api/runs/${activeTest.id}/recover`, {
+                  method: "POST",
+                }).catch((e) => setError(e.message))
+              }
+            >
+              Recover stopped test
+            </button>
+          )}
+        </div>
+      )}
       <div className="upload-grid">
         <section className="panel upload-panel">
           <div className="section-heading">
@@ -232,7 +274,7 @@ export function UploadScreen() {
               {loading ? "Reading CSV…" : "Choose CSV file"}
             </button>
             <span className="file-limit">
-              CSV format · Up to 5 MB · 1,000 rows
+              CSV format · Up to {maxMb} MB · 1,000 rows
             </span>
           </div>
           <div className="example-row">
@@ -390,7 +432,10 @@ export function UploadScreen() {
       </section>
       <div className="upload-footnotes">
         <span>
-          <ShieldCheck size={15} /> Saved locally on your computer
+          <ShieldCheck size={15} />{" "}
+          {hosted
+            ? "Saved in your hosted workspace"
+            : "Saved locally on your computer"}
         </span>
         <span>
           <Clock3 size={15} /> Batches continue when you leave the page
@@ -511,6 +556,26 @@ export function UploadScreen() {
                 </button>
               </div>
               <ErrorBox message={testError} />
+              {testError && test?.execution === "queued" && (
+                <button
+                  className="button secondary small"
+                  onClick={async () => {
+                    try {
+                      setTestError("");
+                      setTesting(true);
+                      await api(`/api/runs/${test.runId}/dispatch`, {
+                        method: "POST",
+                      });
+                      setTestId(test.runId);
+                    } catch (e) {
+                      setTestError((e as Error).message);
+                      setTesting(false);
+                    }
+                  }}
+                >
+                  Retry queue dispatch
+                </button>
+              )}
               {test && (
                 <div className="test-result">
                   <div className="result-meta">

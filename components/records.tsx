@@ -43,6 +43,10 @@ export function RecordsScreen() {
     runId = params.get("run") || "";
   const [records, setRecords] = useState<ListRecord[]>([]),
     [runs, setRuns] = useState<RunSummary[]>([]),
+    [page, setPage] = useState(1),
+    [total, setTotal] = useState(0),
+    [pages, setPages] = useState(1),
+    [folders, setFolders] = useState<string[]>([]),
     [folder, setFolder] = useState(""),
     [execution, setExecution] = useState(""),
     [evaluation, setEvaluation] = useState(""),
@@ -58,13 +62,21 @@ export function RecordsScreen() {
     const poll = async () => {
       try {
         const [rs, rr] = await Promise.all([
-          api<ListRecord[]>(
-            `/api/records${runId ? `?run=${encodeURIComponent(runId)}` : ""}`,
+          api<{
+            records: ListRecord[];
+            total: number;
+            pages: number;
+            folders: string[];
+          }>(
+            `/api/records?${new URLSearchParams({ run: runId, folder, execution, evaluation, q: query, page: String(page) })}`,
           ),
           api<RunSummary[]>("/api/runs"),
         ]);
         if (live) {
-          setRecords(rs);
+          setRecords(rs.records);
+          setTotal(rs.total);
+          setPages(rs.pages);
+          setFolders(rs.folders);
           setRuns(rr);
           setLoading(false);
           setError("");
@@ -82,7 +94,7 @@ export function RecordsScreen() {
       live = false;
       clearInterval(timer);
     };
-  }, [runId]);
+  }, [runId, folder, execution, evaluation, query, page]);
   useEffect(() => {
     if (!detailId) return;
     let live = true;
@@ -116,13 +128,7 @@ export function RecordsScreen() {
       setRetrying(false);
     }
   }
-  const filtered = records.filter(
-    (r) =>
-      (!folder || r.question.folder === folder) &&
-      (!execution || r.execution === execution) &&
-      (!evaluation || r.evaluationStatus === evaluation) &&
-      r.question.query.toLowerCase().includes(query.toLowerCase()),
-  );
+  const filtered = records;
   const run = runs.find((r) => r.id === runId);
   function open(id: string) {
     setDetail(null);
@@ -143,6 +149,21 @@ export function RecordsScreen() {
         </Link>
       </div>
       <ErrorBox message={error} />
+      {run?.dispatchError && (
+        <div className="alert warning">
+          {run.dispatchError}{" "}
+          <button
+            className="button secondary small"
+            onClick={() =>
+              void api(`/api/runs/${run.id}/dispatch`, {
+                method: "POST",
+              }).catch((e) => setError(e.message))
+            }
+          >
+            Retry queue dispatch
+          </button>
+        </div>
+      )}
       {run && (
         <div className="run-banner">
           <div>
@@ -151,6 +172,18 @@ export function RecordsScreen() {
             <span>
               {run.completed} / {run.total} responses
             </span>
+            {run.workflowRunId && run.status === "active" && (
+              <button
+                className="button secondary small"
+                onClick={() =>
+                  void api(`/api/runs/${run.id}/recover`, {
+                    method: "POST",
+                  }).catch((e) => setError(e.message))
+                }
+              >
+                Recover stopped workflow
+              </button>
+            )}
             <span>
               Evaluation {run.evaluated} graded · {run.evaluationFailed} failed
               · {run.skipped} skipped
@@ -171,7 +204,10 @@ export function RecordsScreen() {
               aria-label="Search queries"
               placeholder="Search questions…"
               value={query}
-              onChange={(e) => setQuery(e.target.value)}
+              onChange={(e) => {
+                setQuery(e.target.value);
+                setPage(1);
+              }}
             />
           </div>
           <label>
@@ -181,6 +217,7 @@ export function RecordsScreen() {
               value={runId}
               onChange={(e) => {
                 setFolder("");
+                setPage(1);
                 router.push(
                   e.target.value
                     ? `/records?run=${e.target.value}`
@@ -199,19 +236,23 @@ export function RecordsScreen() {
           <select
             aria-label="Filter by folder"
             value={folder}
-            onChange={(e) => setFolder(e.target.value)}
+            onChange={(e) => {
+              setFolder(e.target.value);
+              setPage(1);
+            }}
           >
             <option value="">All folders</option>
-            {[...new Set(records.map((r) => r.question.folder))]
-              .sort()
-              .map((f) => (
-                <option key={f}>{f}</option>
-              ))}
+            {folders.map((f) => (
+              <option key={f}>{f}</option>
+            ))}
           </select>
           <select
             aria-label="Filter by execution status"
             value={execution}
-            onChange={(e) => setExecution(e.target.value)}
+            onChange={(e) => {
+              setExecution(e.target.value);
+              setPage(1);
+            }}
           >
             <option value="">All executions</option>
             {["queued", "running", "succeeded", "failed", "interrupted"].map(
@@ -225,7 +266,10 @@ export function RecordsScreen() {
           <select
             aria-label="Filter by evaluation status"
             value={evaluation}
-            onChange={(e) => setEvaluation(e.target.value)}
+            onChange={(e) => {
+              setEvaluation(e.target.value);
+              setPage(1);
+            }}
           >
             <option value="">All evaluations</option>
             {["pending", "running", "succeeded", "failed", "skipped"].map(
@@ -238,7 +282,7 @@ export function RecordsScreen() {
           </select>
         </div>
         <div className="record-count">
-          {filtered.length} record{filtered.length === 1 ? "" : "s"}
+          {total} matching record{total === 1 ? "" : "s"}
           <span>Updates automatically</span>
         </div>
         {loading ? (
@@ -275,6 +319,7 @@ export function RecordsScreen() {
                   <th>Doc Search</th>
                   <th>Evaluation</th>
                   <th>Fulfillment</th>
+                  <th>Why this score</th>
                   <th aria-label="Details" />
                 </tr>
               </thead>
@@ -333,6 +378,50 @@ export function RecordsScreen() {
                           : "—"}
                       </strong>
                     </td>
+                    <td className="score-explanation">
+                      {r.evaluationStatus === "succeeded" && r.evaluation ? (
+                        <>
+                          <p>{r.evaluation.assessment}</p>
+                          <details onClick={(e) => e.stopPropagation()}>
+                            <summary>Score breakdown</summary>
+                            <dl>
+                              {dimensionNames.map((dimension) => {
+                                const criterion =
+                                  r.evaluation!.dimensions[dimension];
+                                const weight =
+                                  r.evaluation!.applicableWeights[dimension];
+                                return (
+                                  <div key={dimension}>
+                                    <dt>
+                                      <span>{dimension}</span>
+                                      {criterion.score === null
+                                        ? " · Unassessable"
+                                        : ` · ${criterion.score}/100 · ${Math.round(weight * 10) / 10}% weight`}
+                                    </dt>
+                                    <dd>{criterion.explanation}</dd>
+                                  </div>
+                                );
+                              })}
+                            </dl>
+                            {r.evaluation.limitations.length > 0 && (
+                              <p className="score-limitations">
+                                <strong>Limitations: </strong>
+                                {r.evaluation.limitations.join("; ")}
+                              </p>
+                            )}
+                          </details>
+                        </>
+                      ) : (
+                        <p className="muted">
+                          {r.evaluationReason ||
+                            (r.evaluationStatus === "running"
+                              ? "Evaluation in progress."
+                              : r.evaluationStatus === "pending"
+                                ? "Awaiting evaluation."
+                                : "No scored evaluation available.")}
+                        </p>
+                      )}
+                    </td>
                     <td>
                       <ChevronRight size={15} />
                     </td>
@@ -343,6 +432,27 @@ export function RecordsScreen() {
           </div>
         )}
       </div>
+      {pages > 1 && (
+        <div className="pagination">
+          <button
+            className="button secondary small"
+            disabled={page <= 1}
+            onClick={() => setPage((p) => p - 1)}
+          >
+            Previous
+          </button>
+          <span>
+            Page {Math.min(page, pages)} of {pages}
+          </span>
+          <button
+            className="button secondary small"
+            disabled={page >= pages}
+            onClick={() => setPage((p) => p + 1)}
+          >
+            Next
+          </button>
+        </div>
+      )}
       <p className="metrics-note">
         Source counts represent retrieved passages in the API’s used_sections
         field. Unknown counts and unscored records display “—”. Scores measure
@@ -621,7 +731,7 @@ export function RecordsScreen() {
           </div>
           <div className="modal-footer">
             <span className="muted">
-              Answers and grading are saved locally.
+              Answers and grading are saved in this workspace.
             </span>
             <button
               className="button secondary"
