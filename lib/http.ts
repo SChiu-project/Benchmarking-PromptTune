@@ -1,0 +1,66 @@
+import { z } from "zod";
+import { ConflictError } from "./store";
+export function fail(error: unknown) {
+  if (error instanceof z.ZodError)
+    return Response.json(
+      {
+        error: error.issues
+          .map((i) => `${i.path.join(".")}: ${i.message}`)
+          .join("; "),
+      },
+      { status: 400 },
+    );
+  if (error instanceof ConflictError)
+    return Response.json({ error: error.message }, { status: 409 });
+  if (error instanceof SyntaxError)
+    return Response.json({ error: "Invalid JSON." }, { status: 400 });
+  console.error("Request failed:", error);
+  return Response.json(
+    { error: "Request failed. Check the local server console." },
+    { status: 500 },
+  );
+}
+export function localRequest(req: Request) {
+  const origin = req.headers.get("origin"),
+    host = req.headers.get("host");
+  if (origin && new URL(origin).host !== host)
+    throw new ConflictError("Cross-origin requests are not allowed.");
+  if (
+    host &&
+    !["127.0.0.1", "localhost", "[::1]"].includes(host.replace(/:\d+$/, ""))
+  )
+    throw new ConflictError("Localhost requests only.");
+}
+export async function jsonBody(req: Request) {
+  localRequest(req);
+  const text = await req.text();
+  if (Buffer.byteLength(text) > 10 * 1024 * 1024)
+    throw new ConflictError("Request exceeds 10 MB.");
+  return JSON.parse(text) as unknown;
+}
+export function recordSummary<
+  T extends {
+    result?: { rawRequest: unknown; rawResponse: unknown };
+    failureDetails?: unknown;
+    attempts: unknown[];
+  },
+>(r: T) {
+  const { failureDetails: _, attempts: __, ...rest } = r;
+  void _;
+  void __;
+  return {
+    ...rest,
+    result: r.result
+      ? {
+          ...r.result,
+          rawRequest: undefined,
+          rawResponse: undefined,
+          sources: undefined,
+          sourceCount:
+            "sources" in r.result && Array.isArray(r.result.sources)
+              ? r.result.sources.length
+              : null,
+        }
+      : undefined,
+  };
+}
