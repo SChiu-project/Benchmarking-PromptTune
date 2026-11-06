@@ -7,6 +7,24 @@ import { randomUUID } from "node:crypto";
 import assert from "node:assert/strict";
 import { setTimeout as wait } from "node:timers/promises";
 const scratch = await mkdtemp(join(tmpdir(), "workflow-e2e-"));
+const usePostgres = process.argv.includes("--postgres");
+let databaseUrl = "",
+  database,
+  databaseServer;
+if (usePostgres) {
+  const { PGlite } = await import("@electric-sql/pglite");
+  const { PGLiteSocketServer } = await import("@electric-sql/pglite-socket");
+  database = await PGlite.create();
+  databaseServer = new PGLiteSocketServer({
+    db: database,
+    host: "127.0.0.1",
+    port: 0,
+    maxConnections: 10,
+  });
+  await databaseServer.start();
+  databaseUrl = `postgres://postgres:postgres@${databaseServer.getServerConn()}/postgres`;
+}
+
 const grade = {
   dimensions: Object.fromEntries(
     ["correctness", "coverage", "relevance", "compliance"].map((k) => [
@@ -79,7 +97,8 @@ const server = spawn(
       ...process.env,
       VERCEL: "",
       BENCHMARK_HOSTED: "",
-      DATABASE_URL: "",
+      DATABASE_URL: databaseUrl,
+      BENCHMARK_NAMESPACE: "workflow-smoke",
       APP_PASSWORD: smokePassword,
       APP_USERNAME: "benchmark",
       JOB_BACKEND: "workflow",
@@ -159,8 +178,14 @@ try {
     page.records[0].evaluation.assessment,
     "Deterministic test assessment.",
   );
+  if (usePostgres) {
+    const stored = await database.query(
+      "SELECT jsonb_typeof(payload) AS kind FROM doc_benchmark_state",
+    );
+    assert.equal(stored.rows[0].kind, "object");
+  }
   console.log(
-    "Workflow HTTP smoke passed: Basic auth, durable dispatch, duplicate submission, 2 searches, 2 evaluations, persistence, and record pagination. All upstream services were local mocks.",
+    `Workflow HTTP smoke (${usePostgres ? "PostgreSQL production driver" : "local JSON"}) passed: Basic auth, durable dispatch, duplicate submission, 2 searches, 2 evaluations, persistence, and record pagination. All upstream services were local mocks.`,
   );
 } catch (error) {
   console.error(logs.slice(-14000));
@@ -170,5 +195,7 @@ try {
   server.kill("SIGTERM");
   await stopped;
   await new Promise((resolve) => upstream.close(resolve));
+  await databaseServer?.stop();
+  await database?.close();
   await rm(scratch, { recursive: true, force: true });
 }

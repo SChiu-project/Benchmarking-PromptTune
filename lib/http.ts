@@ -1,7 +1,15 @@
+import { StoredStateError } from "./postgres-store";
 import { z } from "zod";
 import { isVercel } from "./runtime";
 import { ConflictError } from "./store";
 export function fail(error: unknown) {
+  if (error instanceof StoredStateError) {
+    console.error("Stored benchmark state validation failed:", error);
+    return Response.json(
+      { error: error.message, code: "STORED_STATE_INVALID" },
+      { status: 500 },
+    );
+  }
   if (error instanceof z.ZodError)
     return Response.json(
       {
