@@ -1,0 +1,49 @@
+{
+  "message": {
+    "series": [
+      {
+        "text": "The nearest toilets are inside the airport terminal, however I do not have exact directions in my information, please follow the airport overhead signs for toilets or ask airport staff at the arrival hall information counter for precise guidance. [P7]"
+      }
+    ]
+  },
+  "langsmith_trace_id": "observed-trace-redacted",
+  "used_sections": [
+    {
+      "id": "dd1d3c2d-ef7e-5ebc-8d64-f8f7a79ed1a9",
+      "content": "[以下是機場位置圖，請按此瀏覽更多資料。](-/iwov-resources/file/map/Hong_Kong_International_Airport_facilities_shops_location_map_details_Traditional_Chinese.pdf)",
+      "doc_name": "https://www.hongkongairport.com/tc/passenger-guide/airport-facilities-services/shower-facilities",
+      "url": "https://www.hongkongairport.com/tc/passenger-guide/airport-facilities-services/shower-facilities",
+      "tags": [],
+      "main_header": "免費淋浴設施",
+      "closest_header": "位置圖",
+      "page_number": null,
+      "idx": 3,
+      "token_count": 60,
+      "vector": null,
+      "contextual_supplement": null,
+      "context_rule": null,
+      "rerank_score": null,
+      "rerank_relevance_score": null,
+      "certainty": 0.8130099177360535,
+      "retrieval_score": null,
+      "updated_at": "2026-07-24T16:11:09+08:00",
+      "page_date": null,
+      "snippet": null,
+      "retrieval_override_rule_ids": [],
+      "retrieval_override_reserved": false,
+      "retrieval_override_pinned": false,
+      "retrieval_override_requirement_ids": [],
+      "retrieval_override_requirement_members": {},
+      "retrieval_override_matched_sentences": [],
+      "retrieval_override_unmatched_sentences": [],
+      "retrieval_override_added": false,
+      "retrieval_source_types": [
+        "retrieval"
+      ],
+      "source_section_ids": [
+        "dd1d3c2d-ef7e-5ebc-8d64-f8f7a79ed1a9"
+      ]
+    }
+  ],
+  "answering_failed": false
+}
