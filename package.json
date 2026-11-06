@@ -9,7 +9,7 @@
   "scripts": {
     "dev": "node scripts/launch.mjs dev",
     "start": "node scripts/launch.mjs start",
-    "build": "next build --webpack",
+    "build": "next build --webpack && node scripts/verify-build-output.mjs",
     "typecheck": "tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",

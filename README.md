@@ -16,7 +16,7 @@ pnpm dev
 
 Open http://127.0.0.1:3000. `pnpm dev` starts the web server and local queue worker. The existing `Start Benchmark.command` launcher can use the project-local tools installed on the original Mac checkout. The clean GitHub export omits those installed tools, so a fresh checkout needs Node and pnpm installed normally.
 
-Leave `DATABASE_URL` and `JOB_BACKEND` unset for the original local JSON/process mode. `pnpm build` writes `.next-production`; `pnpm start` serves that build locally with the same queue worker. The dev server uses `.next`.
+Leave `DATABASE_URL` and `JOB_BACKEND` unset for the original local JSON/process mode. `pnpm build` writes the standard `.next` directory and verifies its deployment manifests; `pnpm start` serves that build locally with the same queue worker. Vercel uses the same standard output directory.
 
 ## Environment
 

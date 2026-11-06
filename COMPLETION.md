@@ -2,6 +2,12 @@
 
 Prepared 7 November 2026 (Asia/Hong_Kong).
 
+## Deployment output-directory fix
+
+The deployment reported `NEXT_OUTPUT_DIR_MISSING` after successful compilation because the earlier configuration produced `.next-production` while Vercel expected `.next`. The custom `distDir` has been removed. Builds now use `.next` and run `scripts/verify-build-output.mjs` to check the build ID, route manifests, application pages and Workflow handler before reporting success. TypeScript paths and setup instructions now follow the standard output. Generated upload copies are excluded from TypeScript checking.
+
+Verification for this fix: production build and output-artifact check, strict type checking, lint, and the protected Workflow HTTP smoke test passed locally. A fresh extraction of the corrected ZIP also installed with the frozen lockfile and built successfully with Vercel-targeted settings, producing `.next`. A negative check confirmed the build verifier rejects a missing `.next` directory. The corrected package must be pushed to the user's GitHub repository and redeployed in Vercel; a successful live deployment has not been observed here.
+
 ## Ready in source
 
 - Existing CSV review, Doc Search adapter, fulfillment scoring/explanations, Runs/Records screens and local JSON/process-worker mode retained.
