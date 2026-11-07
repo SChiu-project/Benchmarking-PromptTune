@@ -60,7 +60,7 @@ Runs show terminal search progress, separate execution/grading counts, and avera
 - Retries of durable transport/steps cannot resend a dispatched Doc Search POST: persisted record state gates each external call. Unconfirmed running work waits for its lease, then becomes interrupted. Ambiguous external POST timeouts are never automatically repeated. A new search requires an intentional new batch.
 - Completed answers survive queue interruptions. Explicit evaluation retries create a new generation; older workflow generations cannot overwrite it. Retry grading after the run finishes. Dispatch/recovery controls are described in the deployment guide.
 
-State is one atomic snapshot per workspace, suitable for a single-workspace MVP rather than unlimited history. Large histories increase parsing/transaction cost. Invalid saved schemas fail closed. Back up local data only while stopped; use your database provider's backups for hosted data. `.gitignore` excludes credentials, runs, tools, generated Workflow routes, deployment metadata and build output.
+State is one atomic snapshot per workspace, suitable for a single-workspace MVP rather than unlimited history. Large histories increase parsing/transaction cost. PostgreSQL writes explicitly pass JSON text before casting to JSONB, avoiding a second serialization by the driver. Valid string-encoded snapshots from earlier builds are validated and normalized automatically in the same transaction; invalid saved data is preserved and returns a server error. Back up local data only while stopped; use your database provider's backups for hosted data. `.gitignore` excludes credentials, runs, tools, generated Workflow routes, deployment metadata and build output.
 
 ## Response adapter and scoring
 
@@ -88,6 +88,6 @@ pnpm deploy:check
 pnpm package:github
 ```
 
-`test:workflow` uses a disposable local server, local mock upstream APIs, and temporary storage. It makes no live search/evaluator calls. `deploy:check` checks required hosted settings; it does not provision resources or prove live connectivity. `package:github` requires Python 3 and Git and produces a clean source folder plus ZIP, deliberately without the original local Git history.
+`test:workflow` checks both local JSON storage and PostgreSQL through the production driver, using disposable local servers and mock upstream APIs. Driver regression tests also reproduce the earlier JSONB encoding error and verify automatic repair without data loss. These checks make no live search/evaluator calls. `deploy:check` checks required hosted settings; it does not provision resources or prove live connectivity. `package:github` requires Python 3 and Git and produces a clean source folder plus ZIP, deliberately without the original local Git history.
 
 For an optional real service smoke test using your configured evaluator (which may incur charges), run `pnpm exec tsx scripts/smoke.ts`. Optional completed local history migration is available with `pnpm data:import`; see the deployment guide. Actual verification and remaining live-cloud checks are recorded in [COMPLETION.md](COMPLETION.md).

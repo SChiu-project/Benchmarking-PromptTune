@@ -1,6 +1,21 @@
 import postgres from "postgres";
 import { stateSchema, type State } from "./schema";
 import { workspaceNamespace } from "./runtime";
+export class StoredStateError extends Error {
+  constructor(reason: string) {
+    super(
+      "Saved benchmark data could not be read. Existing data has been preserved. Check the server logs.",
+      { cause: new Error(reason) },
+    );
+    this.name = "StoredStateError";
+  }
+}
+function validateSnapshot(value: unknown): State {
+  const result = stateSchema.safeParse(value);
+  if (!result.success)
+    throw new StoredStateError("Snapshot schema validation failed.");
+  return result.data;
+}
 export type SnapshotQuery = (
   text: string,
   values?: string[],
@@ -15,21 +30,34 @@ export async function mutateDatabaseSnapshot<T>(
   await query(
     "CREATE TABLE IF NOT EXISTS doc_benchmark_state (workspace text PRIMARY KEY, payload jsonb NOT NULL, updated_at timestamptz NOT NULL DEFAULT now())",
   );
+  // Text parameters prevent the driver from applying a second JSON serialization.
   await query(
-    "INSERT INTO doc_benchmark_state (workspace, payload) VALUES ($1, $2::jsonb) ON CONFLICT (workspace) DO NOTHING",
+    "INSERT INTO doc_benchmark_state (workspace, payload) VALUES ($1, $2::text::jsonb) ON CONFLICT (workspace) DO NOTHING",
     [namespace, JSON.stringify({ version: 1, runs: [] })],
   );
   const rows = await query(
     "SELECT payload FROM doc_benchmark_state WHERE workspace = $1 FOR UPDATE",
     [namespace],
   );
-  const state = stateSchema.parse(rows[0]?.payload),
+  const payload = rows[0]?.payload;
+  const legacyEncoded = typeof payload === "string";
+  let decoded: unknown = payload;
+  if (legacyEncoded) {
+    // Earlier builds passed JSON text to a JSONB-typed driver parameter, encoding it twice.
+    // Decode only that known legacy shape; schema validation still gates every repair.
+    try {
+      decoded = JSON.parse(payload);
+    } catch {
+      throw new StoredStateError("Legacy snapshot is not valid JSON.");
+    }
+  }
+  const state = validateSnapshot(decoded),
     before = JSON.stringify(state);
   const result = await fn(state),
-    saved = JSON.stringify(stateSchema.parse(state));
-  if (saved !== before)
+    saved = JSON.stringify(validateSnapshot(state));
+  if (saved !== before || legacyEncoded)
     await query(
-      "UPDATE doc_benchmark_state SET payload = $2::jsonb, updated_at = now() WHERE workspace = $1",
+      "UPDATE doc_benchmark_state SET payload = $2::text::jsonb, updated_at = now() WHERE workspace = $1",
       [namespace, saved],
     );
   return structuredClone(result);

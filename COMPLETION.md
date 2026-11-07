@@ -2,6 +2,14 @@
 
 Prepared 7 November 2026 (Asia/Hong_Kong).
 
+## Deployed benchmark database fix
+
+Reproduced the reported `Invalid input: expected object, received string` using the production `postgres` connection driver against an isolated PostgreSQL wire-protocol server. The earlier JSONB parameter caused the driver to serialize already-serialized state again. Direct SQL-engine tests had missed this driver behavior.
+
+Writes now use text parameters followed by a server-side JSONB cast. Reads recognize the known legacy string encoding, decode and validate it, and normalize it within the existing locked transaction. Saved runs, records and evaluation criteria are retained. Undecodable or invalid saved state remains unchanged and returns a distinct server error rather than a CSV validation error.
+
+Six production-driver regressions cover the original failure, new snapshots, nested question persistence and duplicate submissions, legacy repair, and preservation of malformed/schema-invalid data. The complete HTTP/Workflow smoke now runs against both JSON storage and PostgreSQL through the real driver. No user database or live upstream API was used for these checks. The fix still requires updating GitHub and redeploying the hosted application.
+
 ## Deployment output-directory fix
 
 The deployment reported `NEXT_OUTPUT_DIR_MISSING` after successful compilation because the earlier configuration produced `.next-production` while Vercel expected `.next`. The custom `distDir` has been removed. Builds now use `.next` and run `scripts/verify-build-output.mjs` to check the build ID, route manifests, application pages and Workflow handler before reporting success. TypeScript paths and setup instructions now follow the standard output. Generated upload copies are excluded from TypeScript checking.
@@ -21,10 +29,10 @@ Verification for this fix: production build and output-artifact check, strict ty
 - Production `pnpm build`: passed, including compiled Workflow and Next.js proxy routes.
 - `pnpm typecheck`: passed.
 - `pnpm lint`: passed; generated Workflow routes are excluded from authored-source lint checks.
-- `pnpm test`: 28 tests passed across 4 files. Includes original 20 regressions plus cross-invocation queue limits, duplicate/ambiguous dispatch handling, workflow generations, hosted auth/origins, fail-closed database config, full-dataset pagination, and actual PostgreSQL SQL/JSONB/namespace/rollback behavior using an isolated PGlite engine.
-- `pnpm test:workflow`: passed. Real local HTTP route → SDK dispatch → durable workflow → two mock Doc Search calls → two mock LLM evaluations → persisted terminal run → paginated records. Duplicate submission retained the same run ID and caused no duplicate upstream requests. Temporary data and mock credentials only; no real service calls.
+- `pnpm test`: 34 tests passed across 5 files. Includes original 20 regressions plus cross-invocation queue limits, duplicate/ambiguous dispatch handling, workflow generations, hosted auth/origins, fail-closed database config, full-dataset pagination, actual PostgreSQL SQL/JSONB/namespace/rollback behavior, and production-driver serialization/legacy-repair checks using an isolated PGlite engine and wire-protocol server.
+- `pnpm test:workflow`: passed for both local JSON and PostgreSQL production-driver storage. Each path exercises a real local HTTP route → SDK dispatch → durable workflow → two mock Doc Search calls → two mock LLM evaluations → persisted terminal run → paginated records. Duplicate submission retained the same run ID and caused no duplicate upstream requests. Temporary data and mock credentials only; no real service calls.
 - Vercel-targeted production compilation with a dummy deployment identity: passed; generated managed queue trigger configuration was inspected. This does not exercise a real Vercel deployment.
-- Clean ZIP extraction: frozen dependency install, production build, 28 tests, and protected Workflow HTTP smoke passed without the original environment file or saved data.
+- Previous output-directory-fix ZIP extraction: frozen dependency install, production build, the then-current 28 tests, and protected Workflow HTTP smoke passed without the original environment file or saved data. The database-fix export includes the updated 34-test suite and both Workflow storage checks.
 - Browser check: existing six saved records and their fulfillment explanations still render with the new paginated API.
 - Server function tracing: no local credentials, saved data, or installed local tools included.
 - Existing real-service integration was smoke-tested during the initial local build on 6 November. Those live API calls were not repeated for the hosting preparation.

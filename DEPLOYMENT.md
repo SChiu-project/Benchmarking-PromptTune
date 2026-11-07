@@ -59,7 +59,7 @@ Inspect the **Workflows** section in Vercel if a batch does not progress. A disp
 
 If you canceled a workflow in Vercel or the platform marked it failed, use **Recover stopped workflow** in that run's Records view. Recovery verifies the workflow is terminal and waits for any in-flight request leases to expire. It marks unfinished work interrupted/skipped and preserves saved answers. It does not repeat searches. You can then start an intentional new batch or retry grading saved answers. Never clear an active database row by hand.
 
-The automated GitHub check builds the app, checks TypeScript/lint, runs deterministic tests, and exercises the Workflow HTTP path against isolated local mock services. No real evaluator key is needed for CI.
+The automated GitHub check builds the app, checks TypeScript/lint, runs deterministic tests, and exercises the Workflow HTTP path with both JSON and PostgreSQL storage against isolated local mock services. PostgreSQL checks use the actual production connection driver with a disposable local PostgreSQL engine. No real evaluator key is needed for CI.
 
 ## Optional: bring existing local results
 
@@ -80,3 +80,11 @@ The production Workflow build, isolated PostgreSQL SQL tests, mock-service durab
 If your log shows a successful Next.js build followed by Vercel looking for `/vercel/path0/.next`, use the corrected `next.config.ts` from this package. The earlier package set a custom `.next-production` directory, which did not match the deployment collector's expected `.next` path. The corrected configuration uses the Next.js default; the build command now verifies `.next/BUILD_ID` and the deployment manifests.
 
 Push the corrected files to GitHub, check that Vercel's Framework Preset is **Next.js**, leave its Output Directory override off (or `.next`), and redeploy the new commit without the previous build cache. Root Directory must be the folder containing `package.json`. This fixes the reported output-folder failure; a successful live deployment still needs to be confirmed in Vercel.
+
+## Fixing “Invalid input: expected object, received string” when starting a batch
+
+An earlier build passed already-serialized JSON to a JSONB-typed driver parameter. The PostgreSQL driver serialized it a second time, so saved state was a JSON string instead of an object. The CSV could parse successfully while starting a run failed with this validation error.
+
+Update the repository with the corrected source from this package and redeploy. The corrected database writes avoid double serialization. On the next read, existing string-encoded state is decoded, validated, and normalized in a locked transaction, preserving its saved runs and records. No database reset, table deletion, or credential change is needed for this error. Reload the application after deployment and retry the batch.
+
+If saved content cannot be decoded or fails validation, the application preserves it and reports `STORED_STATE_INVALID` as a server error. Inspect Vercel server logs before making any manual database changes. The automatic repair is covered by production-driver regression tests; repair of the user's live database must still be confirmed after redeployment.
