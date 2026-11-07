@@ -1,7 +1,10 @@
 import { afterEach, expect, it, vi } from "vitest";
 import { api, ApiError } from "../lib/api-client";
 
-afterEach(() => vi.unstubAllGlobals());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.restoreAllMocks();
+});
 async function rejected(promise: Promise<unknown>): Promise<ApiError> {
   try {
     await promise;
@@ -25,6 +28,7 @@ it("returns successful JSON, including arrays, without changing the submitted bo
   expect(fetch).toHaveBeenCalledExactlyOnceWith("/api/runs", {
     ...init,
     cache: "no-store",
+    signal: expect.any(AbortSignal),
   });
 });
 it("preserves application JSON errors and their status", async () => {
@@ -100,5 +104,49 @@ it("does not expose arbitrary response headers or repeat a request after a netwo
   expect(error.status).toBe(0);
   expect(error.message).toContain("may already have been saved");
   expect(error.message).not.toContain("internal network details");
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it("aborts a stuck read at its deadline without launching a second request", async () => {
+  const controller = new AbortController();
+  const timeout = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockReturnValue(controller.signal);
+  const fetch = vi.fn(
+    (_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () =>
+          reject(new Error("aborted")),
+        );
+      }),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const pending = rejected(api("/api/status"));
+  controller.abort();
+  const error = await pending;
+  expect(error.message).toContain("timed out");
+  expect(timeout).toHaveBeenCalledWith(15000);
+  expect(fetch).toHaveBeenCalledTimes(1);
+});
+
+it("keeps an interrupted mutation ambiguous and gives it a separate deadline", async () => {
+  const controller = new AbortController();
+  const timeout = vi
+    .spyOn(AbortSignal, "timeout")
+    .mockReturnValue(controller.signal);
+  const fetch = vi.fn(
+    (_url: string, init: RequestInit) =>
+      new Promise((_resolve, reject) => {
+        init.signal?.addEventListener("abort", () =>
+          reject(new Error("aborted")),
+        );
+      }),
+  );
+  vi.stubGlobal("fetch", fetch);
+  const pending = rejected(api("/api/runs", { method: "POST" }));
+  controller.abort();
+  const error = await pending;
+  expect(error.message).toContain("may already have been saved");
+  expect(timeout).toHaveBeenCalledWith(45000);
   expect(fetch).toHaveBeenCalledTimes(1);
 });

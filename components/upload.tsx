@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { startPolling } from "../lib/polling";
 import {
   UploadCloud,
   Download,
@@ -50,39 +51,40 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     [testError, setTestError] = useState("");
   useEffect(() => {
     let live = true;
-    const refresh = () => {
-      api<{ evaluatorConfigured: boolean; activeTest: RunSummary | null }>(
-        "/api/status",
-      )
-        .then((s) => {
-          if (live) {
-            setConfigured(s.evaluatorConfigured);
-            setActiveTest(s.activeTest);
-          }
-        })
-        .catch(() => {});
-      api<RunSummary[]>("/api/runs")
-        .then((r) => {
-          if (live) setRecent(r.slice(0, 3));
-        })
-        .catch((e) => {
-          if (live) setError(e.message);
-        });
-    };
-    refresh();
-    const timer = setInterval(refresh, 2500);
+    const stop = startPolling(async (signal) => {
+      try {
+        const [status, runs] = await Promise.allSettled([
+          api<{ evaluatorConfigured: boolean; activeTest: RunSummary | null }>(
+            "/api/status",
+            { signal },
+          ),
+          api<RunSummary[]>("/api/runs", { signal }),
+        ]);
+        if (status.status === "rejected") throw status.reason;
+        if (runs.status === "rejected") throw runs.reason;
+        if (live) {
+          setConfigured(status.value.evaluatorConfigured);
+          setActiveTest(status.value.activeTest);
+          setRecent(runs.value.slice(0, 3));
+        }
+      } catch (error) {
+        if (live) setError((error as Error).message);
+        return false;
+      }
+    }, 2500);
     return () => {
       live = false;
-      clearInterval(timer);
+      stop();
     };
   }, []);
   useEffect(() => {
     if (!testId) return;
     let live = true;
-    const poll = async () => {
+    const stop = startPolling(async (signal) => {
       try {
         const value = await api<{ summary: RunSummary; records: RecordData[] }>(
           `/api/runs/${testId}`,
+          { signal },
         );
         if (!live) return;
         const r = value.records[0];
@@ -102,12 +104,10 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
           setTestId("");
         }
       }
-    };
-    void poll();
-    const timer = setInterval(poll, 1000);
+    }, 1000);
     return () => {
       live = false;
-      clearInterval(timer);
+      stop();
     };
   }, [testId]);
   async function upload(file: File) {

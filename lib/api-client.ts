@@ -26,12 +26,19 @@ export async function api<T>(url: string, init?: RequestInit): Promise<T> {
     : "";
   let response: Response;
   let text: string;
+  const deadline = AbortSignal.timeout(changesState ? 45000 : 15000);
   try {
-    response = await fetch(url, { ...init, cache: "no-store" });
+    response = await fetch(url, {
+      ...init,
+      cache: "no-store",
+      signal: init?.signal
+        ? AbortSignal.any([init.signal, deadline])
+        : deadline,
+    });
     text = await response.text();
   } catch {
     throw new ApiError(
-      `Could not reach the application. Check your connection and deployment.${uncertain}`,
+      `${deadline.aborted ? "The application request timed out." : "Could not reach the application."} Check your connection and deployment.${uncertain}`,
       0,
     );
   }

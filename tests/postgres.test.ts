@@ -3,6 +3,7 @@ import { randomUUID } from "node:crypto";
 import { PGlite } from "@electric-sql/pglite";
 import {
   mutateDatabaseSnapshot,
+  initializeDatabaseSchema,
   type SnapshotQuery,
 } from "../lib/postgres-store";
 it("runs the production snapshot SQL with JSONB persistence, namespace isolation and rollback", async () => {
@@ -21,6 +22,12 @@ it("runs the production snapshot SQL with JSONB persistence, namespace isolation
       ),
     );
   try {
+    await db.transaction(async (connection) => {
+      await initializeDatabaseSchema(
+        (async (text, values = []) =>
+          (await connection.query(text, values)).rows) as SnapshotQuery,
+      );
+    });
     await tx("production", (s) => {
       s.runs.push({
         id: randomUUID(),
