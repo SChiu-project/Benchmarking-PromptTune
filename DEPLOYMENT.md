@@ -88,3 +88,13 @@ An earlier build passed already-serialized JSON to a JSONB-typed driver paramete
 Update the repository with the corrected source from this package and redeploy. The corrected database writes avoid double serialization. On the next read, existing string-encoded state is decoded, validated, and normalized in a locked transaction, preserving its saved runs and records. No database reset, table deletion, or credential change is needed for this error. Reload the application after deployment and retry the batch.
 
 If saved content cannot be decoded or fails validation, the application preserves it and reports `STORED_STATE_INVALID` as a server error. Inspect Vercel server logs before making any manual database changes. The automatic repair is covered by production-driver regression tests; repair of the user's live database must still be confirmed after redeployment.
+
+## “Unexpected token 'A', 'An error o' ... is not valid JSON”
+
+This message means the browser received a non-JSON response and the earlier client tried to parse it as JSON. It does not identify the server failure. A hosting error page, timeout, access restriction, or failed function can return plain text or HTML. The CSV may already have parsed successfully.
+
+The updated client handles these responses and shows the HTTP status, platform error code, and Vercel request ID when available. It preserves normal JSON application errors and never automatically repeats a failed submission. A response failure does not prove the batch was not saved: check Runs before creating another batch.
+
+To find the underlying failure without redeploying, open the Vercel project → **Logs**, reproduce the problem once, and select the failed `POST /api/runs` request (or `POST /api/test` if testing connectivity). Copy its HTTP status, error code, and server exception/stack trace, omitting credentials. The browser's Network panel can also show the failed request's status, response body, and `x-vercel-id` header. A function crash or timeout may occur before application error handling can return JSON. Diagnose the recorded error rather than resetting the database or changing credentials based on this parser message alone.
+
+The response-handling fix is verified with text/HTML/empty failures, authentication failures, timeouts, and ambiguous submission results. The underlying cause of the newly reported live deployment failure remains unconfirmed until its runtime log or full failed HTTP response is available.

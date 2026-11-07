@@ -2,6 +2,12 @@
 
 Prepared 7 November 2026 (Asia/Hong_Kong).
 
+## Hosting error response diagnostics
+
+The second screenshot shows a client JSON parsing failure after a response beginning `An error o`. The client previously parsed every response as JSON before checking HTTP status. This masked non-JSON platform/access errors. The underlying live server failure cannot be identified from that truncated parser message; Vercel Runtime Logs or the complete failed HTTP response are required.
+
+The browser request helper now handles text, HTML, empty responses and network failures; preserves application JSON errors; reports status/platform code/request ID when available; and reminds users that a failed submission response may still have saved work. It never retries submissions automatically or displays arbitrary server response bodies. Nine regressions cover these scenarios. This improves diagnosis; it is not a claim that the live function failure has been repaired.
+
 ## Deployed benchmark database fix
 
 Reproduced the reported `Invalid input: expected object, received string` using the production `postgres` connection driver against an isolated PostgreSQL wire-protocol server. The earlier JSONB parameter caused the driver to serialize already-serialized state again. Direct SQL-engine tests had missed this driver behavior.
@@ -29,7 +35,7 @@ Verification for this fix: production build and output-artifact check, strict ty
 - Production `pnpm build`: passed, including compiled Workflow and Next.js proxy routes.
 - `pnpm typecheck`: passed.
 - `pnpm lint`: passed; generated Workflow routes are excluded from authored-source lint checks.
-- `pnpm test`: 34 tests passed across 5 files. Includes original 20 regressions plus cross-invocation queue limits, duplicate/ambiguous dispatch handling, workflow generations, hosted auth/origins, fail-closed database config, full-dataset pagination, actual PostgreSQL SQL/JSONB/namespace/rollback behavior, and production-driver serialization/legacy-repair checks using an isolated PGlite engine and wire-protocol server.
+- `pnpm test`: 43 tests passed across 6 files. Includes original 20 regressions plus cross-invocation queue limits, duplicate/ambiguous dispatch handling, workflow generations, hosted auth/origins, fail-closed database config, full-dataset pagination, actual PostgreSQL SQL/JSONB/namespace/rollback behavior, production-driver serialization/legacy-repair checks using an isolated PGlite engine and wire-protocol server, and nine browser request error-handling regressions.
 - `pnpm test:workflow`: passed for both local JSON and PostgreSQL production-driver storage. Each path exercises a real local HTTP route → SDK dispatch → durable workflow → two mock Doc Search calls → two mock LLM evaluations → persisted terminal run → paginated records. Duplicate submission retained the same run ID and caused no duplicate upstream requests. Temporary data and mock credentials only; no real service calls.
 - Vercel-targeted production compilation with a dummy deployment identity: passed; generated managed queue trigger configuration was inspected. This does not exercise a real Vercel deployment.
 - Previous output-directory-fix ZIP extraction: frozen dependency install, production build, the then-current 28 tests, and protected Workflow HTTP smoke passed without the original environment file or saved data. The database-fix export includes the updated 34-test suite and both Workflow storage checks.

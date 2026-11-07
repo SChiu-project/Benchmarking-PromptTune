@@ -1,13 +1,7 @@
 "use client";
 import { useEffect, useRef, useState, useId } from "react";
 import { X, Copy, Check } from "lucide-react";
-export async function api<T>(url: string, init?: RequestInit): Promise<T> {
-  const response = await fetch(url, { ...init, cache: "no-store" });
-  const value = await response.json();
-  if (!response.ok)
-    throw new Error(value.error || `Request failed (${response.status})`);
-  return value as T;
-}
+export { api } from "../lib/api-client";
 export function Badge({ value }: { value: string }) {
   return (
     <span className={`badge ${value}`}>
