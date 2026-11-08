@@ -7,12 +7,12 @@ export const dynamic = "force-dynamic";
 export async function GET(req: Request) {
   try {
     localRequest(req);
-    const activeTest = (await readState()).runs.find(
-      (r) => r.kind === "test" && r.status === "active",
+    const activeRun = (await readState()).runs.find(
+      (r) => r.status === "active",
     );
     return Response.json({
       evaluatorConfigured: Boolean(evaluatorConfig()),
-      activeTest: activeTest ? summarize(activeTest) : null,
+      activeRun: activeRun ? summarize(activeRun) : null,
     });
   } catch (e) {
     return fail(e);

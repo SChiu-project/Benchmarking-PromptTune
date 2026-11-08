@@ -44,7 +44,9 @@ export async function dispatchRun(id: string) {
         !r.workflowRunId
       )
         r.dispatchError =
-          "Queue dispatch could not be confirmed. Use Retry queue dispatch; saved questions will not be duplicated.";
+          isVercel() && !process.env.VERCEL_DEPLOYMENT_ID
+            ? "Enable Vercel System Environment Variables and redeploy, then retry queue dispatch."
+            : "Queue dispatch could not be confirmed. Use Retry queue dispatch; saved questions will not be duplicated.";
     });
   }
 }

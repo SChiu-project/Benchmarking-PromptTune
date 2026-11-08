@@ -43,7 +43,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     [starting, setStarting] = useState(false),
     [drag, setDrag] = useState(false),
     [recent, setRecent] = useState<RunSummary[]>([]),
-    [activeTest, setActiveTest] = useState<RunSummary | null>(null),
+    [activeRun, setActiveRun] = useState<RunSummary | null>(null),
     [configured, setConfigured] = useState<boolean | null>(null),
     [testId, setTestId] = useState(""),
     [testing, setTesting] = useState(false),
@@ -54,7 +54,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     const stop = startPolling(async (signal) => {
       try {
         const [status, runs] = await Promise.allSettled([
-          api<{ evaluatorConfigured: boolean; activeTest: RunSummary | null }>(
+          api<{ evaluatorConfigured: boolean; activeRun: RunSummary | null }>(
             "/api/status",
             { signal },
           ),
@@ -64,7 +64,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         if (runs.status === "rejected") throw runs.reason;
         if (live) {
           setConfigured(status.value.evaluatorConfigured);
-          setActiveTest(status.value.activeTest);
+          setActiveRun(status.value.activeRun);
           setRecent(runs.value.slice(0, 3));
         }
       } catch (error) {
@@ -183,6 +183,40 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     !review?.questions.length ||
     Boolean(review.errors.length) ||
     Boolean(review.conflicts.length && !resolved);
+  const activeNotice = activeRun && (
+    <div className="alert info">
+      {activeRun.kind === "test" ? "A connectivity test" : "A benchmark run"} is
+      active.{" "}
+      {activeRun.dispatchError || "It continues independently of this page."}{" "}
+      {activeRun.kind === "batch" && (
+        <Link href={`/records?run=${activeRun.id}`}>View run</Link>
+      )}{" "}
+      {hosted && !activeRun.workflowRunId && (
+        <button
+          className="button secondary small"
+          onClick={() =>
+            void api(`/api/runs/${activeRun.id}/dispatch`, {
+              method: "POST",
+            }).catch((e) => setError(e.message))
+          }
+        >
+          Retry queue dispatch
+        </button>
+      )}{" "}
+      {activeRun.workflowRunId && (
+        <button
+          className="button secondary small"
+          onClick={() =>
+            void api(`/api/runs/${activeRun.id}/recover`, {
+              method: "POST",
+            }).catch((e) => setError(e.message))
+          }
+        >
+          Recover stopped {activeRun.kind === "test" ? "test" : "run"}
+        </button>
+      )}
+    </div>
+  );
   return (
     <>
       <div className="page-heading">
@@ -191,37 +225,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         <p>Turn your test questions into a clear picture of answer quality.</p>
       </div>
       <ErrorBox message={!review ? error : ""} />
-      {activeTest && !review && (
-        <div className="alert info">
-          A connectivity test is active.{" "}
-          {activeTest.dispatchError ||
-            "It continues independently of this page."}{" "}
-          {activeTest.dispatchError && (
-            <button
-              className="button secondary small"
-              onClick={() =>
-                void api(`/api/runs/${activeTest.id}/dispatch`, {
-                  method: "POST",
-                }).catch((e) => setError(e.message))
-              }
-            >
-              Retry queue dispatch
-            </button>
-          )}{" "}
-          {activeTest.workflowRunId && (
-            <button
-              className="button secondary small"
-              onClick={() =>
-                void api(`/api/runs/${activeTest.id}/recover`, {
-                  method: "POST",
-                }).catch((e) => setError(e.message))
-              }
-            >
-              Recover stopped test
-            </button>
-          )}
-        </div>
-      )}
+      {!review && activeNotice}
       <div className="upload-grid">
         <section className="panel upload-panel">
           <div className="section-heading">
@@ -459,6 +463,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         >
           <div className="modal-body">
             <ErrorBox message={error} />
+            {activeNotice}
             <div className="review-stats">
               {[
                 ["Input rows", review.total],
