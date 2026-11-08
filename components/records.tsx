@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { startPolling } from "../lib/polling";
 import {
   Search,
   Rows3,
@@ -59,9 +60,9 @@ export function RecordsScreen() {
     [retrying, setRetrying] = useState(false);
   useEffect(() => {
     let live = true;
-    const poll = async () => {
+    const stop = startPolling(async (signal) => {
       try {
-        const [rs, rr] = await Promise.all([
+        const [rs, rr] = await Promise.allSettled([
           api<{
             records: ListRecord[];
             total: number;
@@ -69,15 +70,18 @@ export function RecordsScreen() {
             folders: string[];
           }>(
             `/api/records?${new URLSearchParams({ run: runId, folder, execution, evaluation, q: query, page: String(page) })}`,
+            { signal },
           ),
-          api<RunSummary[]>("/api/runs"),
+          api<RunSummary[]>("/api/runs", { signal }),
         ]);
+        if (rs.status === "rejected") throw rs.reason;
+        if (rr.status === "rejected") throw rr.reason;
         if (live) {
-          setRecords(rs.records);
-          setTotal(rs.total);
-          setPages(rs.pages);
-          setFolders(rs.folders);
-          setRuns(rr);
+          setRecords(rs.value.records);
+          setTotal(rs.value.total);
+          setPages(rs.value.pages);
+          setFolders(rs.value.folders);
+          setRuns(rr.value);
           setLoading(false);
           setError("");
         }
@@ -86,33 +90,34 @@ export function RecordsScreen() {
           setError((e as Error).message);
           setLoading(false);
         }
+        return false;
       }
-    };
-    void poll();
-    const timer = setInterval(poll, 1500);
+    }, 1500);
     return () => {
       live = false;
-      clearInterval(timer);
+      stop();
     };
   }, [runId, folder, execution, evaluation, query, page]);
   useEffect(() => {
     if (!detailId) return;
     let live = true;
-    const poll = () =>
-      api<RecordData>(`/api/records/${detailId}`)
-        .then((r) => {
-          if (live) {
-            setDetail(r);
-          }
-        })
-        .catch((e) => {
-          if (live) setDetailError(e.message);
-        });
-    void poll();
-    const timer = setInterval(poll, 1500);
+    const stop = startPolling(
+      (signal) =>
+        api<RecordData>(`/api/records/${detailId}`, { signal })
+          .then((r) => {
+            if (live) {
+              setDetail(r);
+            }
+          })
+          .catch((e) => {
+            if (live) setDetailError(e.message);
+            return false;
+          }),
+      1500,
+    );
     return () => {
       live = false;
-      clearInterval(timer);
+      stop();
     };
   }, [detailId]);
   async function retry() {

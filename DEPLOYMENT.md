@@ -25,7 +25,7 @@ The Workflow SDK selects Vercel's managed execution backend during deployment. R
 
 Add a PostgreSQL integration through Vercel's Marketplace, for example **Neon**, or use an existing compatible PostgreSQL database. Connect it to the project and provide its pooled TLS-enabled connection string as `DATABASE_URL`.
 
-The application creates its `doc_benchmark_state` table and workspace row on first use. The database role needs permission to create this table and read/write it. State updates run in transactions with advisory/row locks; queued questions, responses, raw JSON, scores, and attempt history survive serverless restarts. There is no hosted fallback to JSON files. [Neon's Vercel integration guide](https://neon.com/docs/guides/vercel-overview).
+The application creates its `doc_benchmark_state` table on first use and a workspace row on the first write. The database role needs permission to create this table and read/write it. State updates run in transactions with workspace row locks; the schema bootstrap alone uses an advisory lock. Routine page reads avoid those write locks and schema changes. Queued questions, responses, raw JSON, scores, and attempt history survive serverless restarts. There is no hosted fallback to JSON files. [Neon's Vercel integration guide](https://neon.com/docs/guides/vercel-overview).
 
 Use a separate database/branch for Preview where possible. The app also separates default workspace namespaces: `production` for production, `preview:<branch>` for previews. Set `BENCHMARK_NAMESPACE` only when you intentionally want a different workspace. Do not give previews the production namespace against the same database.
 
@@ -88,3 +88,36 @@ An earlier build passed already-serialized JSON to a JSONB-typed driver paramete
 Update the repository with the corrected source from this package and redeploy. The corrected database writes avoid double serialization. On the next read, existing string-encoded state is decoded, validated, and normalized in a locked transaction, preserving its saved runs and records. No database reset, table deletion, or credential change is needed for this error. Reload the application after deployment and retry the batch.
 
 If saved content cannot be decoded or fails validation, the application preserves it and reports `STORED_STATE_INVALID` as a server error. Inspect Vercel server logs before making any manual database changes. The automatic repair is covered by production-driver regression tests; repair of the user's live database must still be confirmed after redeployment.
+
+## “Unexpected token 'A', 'An error o' ... is not valid JSON”
+
+This message means the browser received a non-JSON response and the earlier client tried to parse it as JSON. It does not identify the server failure. A hosting error page, timeout, access restriction, or failed function can return plain text or HTML. The CSV may already have parsed successfully.
+
+The updated client handles these responses and shows the HTTP status, platform error code, and Vercel request ID when available. It preserves normal JSON application errors and never automatically repeats a failed submission. A response failure does not prove the batch was not saved: check Runs before creating another batch.
+
+To find the underlying failure without redeploying, open the Vercel project → **Logs**, reproduce the problem once, and select the failed `POST /api/runs` request (or `POST /api/test` if testing connectivity). Copy its HTTP status, error code, and server exception/stack trace, omitting credentials. The browser's Network panel can also show the failed request's status, response body, and `x-vercel-id` header. A function crash or timeout may occur before application error handling can return JSON. Diagnose the recorded error rather than resetting the database or changing credentials based on this parser message alone.
+
+The response-handling fix is verified with text/HTML/empty failures, authentication failures, timeouts, and ambiguous submission results. The subsequently supplied logs show five-minute timeouts on both `/api/runs` and `/api/status`; see the following section for the database and polling fix.
+
+## Repeated “Task timed out after 300 seconds” on status and run routes
+
+Both these routes read benchmark state. The old implementation took a global write lock, ran table initialization and inserted a workspace row on every read. It also had no query or pool-queue deadline. Browser intervals kept sending more requests while earlier requests were still waiting. This made a stalled connection or database lock capable of blocking routine page refreshes and building a large backlog. The `42P07` notice saying the table already exists is informational; it is not the timeout error.
+
+The corrected implementation reads existing state with plain SELECTs, initializes the schema once per application client, and locks the workspace row only for mutations or legacy format repair. Driver limits are 8 seconds for connection/query waits, 5 seconds for waiting for a pool connection, and 2 seconds for an unanswered cancellation. Writes set transaction-local lock (2s), statement (5s), and idle-in-transaction (10s) timeouts. These are individual operation limits, not a guarantee that every multi-query request finishes within 8 seconds. Failed database operations return a sanitized JSON `503 DATABASE_UNAVAILABLE` with a database error code. Work is never automatically resubmitted after an ambiguous failure.
+
+Browser refreshes now wait for all current reads to settle, then schedule the next refresh. Failed refreshes back off up to 30 seconds. Reads have a 15-second browser deadline; submissions have 45 seconds and retain the warning that work may already be saved. Leaving a view aborts its outstanding read requests.
+
+Update the GitHub source and redeploy this version. Close old application tabs while deploying, then open the new deployment and check Runs before starting another batch. Existing state is retained. If a run is still active, inspect its Workflow status; use the existing recovery control only after that workflow is stopped and its in-flight leases expire. A longer Vercel function timeout does not remove the database backlog.
+
+If the new deployment reports `DATABASE_UNAVAILABLE`, its server log includes a safe database code such as `55P03` (lock wait) or `QUERY_TIMEOUT`. In the database provider's SQL editor, this read-only query can identify blocking sessions without displaying uploaded content:
+
+```sql
+SELECT pid, application_name, state, wait_event_type, wait_event,
+       now() - xact_start AS transaction_age,
+       pg_blocking_pids(pid) AS blocking_pids
+FROM pg_stat_activity
+WHERE datname = current_database() AND pid <> pg_backend_pid()
+ORDER BY xact_start NULLS LAST;
+```
+
+Old deployments can leave sessions that do not have the new idle timeout. Have the database owner inspect any persistent blocker before terminating it; do not delete saved benchmark rows. The supplied logs establish the timeout pattern but do not identify the original blocking session or prove a specific connection-provider fault. Local fault tests verify bounded failure and reconnection; live recovery still needs confirmation after redeployment. [PostgreSQL timeout behavior](https://www.postgresql.org/docs/current/runtime-config-client.html), [Neon transaction pooling](https://neon.com/docs/connect/connection-pooling).

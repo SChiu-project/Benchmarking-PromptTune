@@ -10,6 +10,7 @@ import {
 import { createRun, readState } from "../lib/store";
 import { fail } from "../lib/http";
 import { randomUUID } from "node:crypto";
+import { tracingChannel } from "node:diagnostics_channel";
 let db: PGlite, server: PGLiteSocketServer, sql: ReturnType<typeof postgres>;
 let original: NodeJS.ProcessEnv;
 beforeAll(async () => {
@@ -55,6 +56,65 @@ it("reads a newly initialized snapshot as an object through the production drive
     "SELECT jsonb_typeof(payload) AS kind FROM doc_benchmark_state",
   );
   expect(stored.kind).toBe("object");
+});
+
+it("polls existing state with plain SELECTs instead of DDL, INSERTs or write locks", async () => {
+  await databaseTransaction((s) => s);
+  const queries: string[] = [];
+  const subscriber = {
+    start(context: unknown) {
+      const query = (context as { query?: string }).query;
+      if (query) queries.push(query);
+    },
+  };
+  const channel = tracingChannel("postgres:query");
+  channel.subscribe(subscriber);
+  try {
+    await Promise.all(Array.from({ length: 8 }, () => readState()));
+    expect(queries).toHaveLength(8);
+    expect(queries.every((q) => q.startsWith("SELECT payload FROM"))).toBe(
+      true,
+    );
+    expect(queries.join(" ")).not.toMatch(
+      /FOR UPDATE|advisory|CREATE|INSERT|BEGIN/i,
+    );
+  } finally {
+    channel.unsubscribe(subscriber);
+  }
+});
+
+it("reads an empty workspace without inserting a snapshot row", async () => {
+  expect(await readState()).toEqual({ version: 1, runs: [] });
+  const [row] = await sql.unsafe(
+    "SELECT count(*)::int AS count FROM doc_benchmark_state",
+  );
+  expect(row.count).toBe(0);
+});
+
+it("sets transaction-local lock, query and idle limits before mutations", async () => {
+  const queries: string[] = [];
+  const subscriber = {
+    start(context: unknown) {
+      const query = (context as { query?: string }).query;
+      if (query) queries.push(query);
+    },
+  };
+  const channel = tracingChannel("postgres:query");
+  channel.subscribe(subscriber);
+  try {
+    await databaseTransaction((s) => s);
+    const insert = queries.findIndex((q) => q.startsWith("INSERT INTO"));
+    expect(insert).toBeGreaterThan(0);
+    expect(queries.slice(0, insert)).toContain("SET LOCAL lock_timeout = '2s'");
+    expect(queries.slice(0, insert)).toContain(
+      "SET LOCAL statement_timeout = '5s'",
+    );
+    expect(queries.slice(0, insert)).toContain(
+      "SET LOCAL idle_in_transaction_session_timeout = '10s'",
+    );
+  } finally {
+    channel.unsubscribe(subscriber);
+  }
 });
 
 it("persists and reloads a queued batch with nested Unicode text through the real driver", async () => {

@@ -11,7 +11,7 @@ import {
   type CreateRun,
 } from "./schema";
 import { databaseMode, workflowMode, isVercel } from "./runtime";
-import { databaseTransaction } from "./postgres-store";
+import { databaseTransaction, readDatabaseSnapshot } from "./postgres-store";
 import { searchConfig } from "./doc-search";
 export const dataDir = () =>
   process.env.DATA_DIR || path.join(process.cwd(), "data");
@@ -57,6 +57,7 @@ export async function transaction<T>(
   }
 }
 export async function readState() {
+  if (databaseMode()) return readDatabaseSnapshot();
   return transaction((s) => s);
 }
 export function finishRuns(s: State) {

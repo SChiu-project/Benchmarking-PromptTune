@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { startPolling } from "../lib/polling";
 import { useRouter } from "next/navigation";
 import { Plus, Layers3, Activity, CheckCircle2, Target } from "lucide-react";
 import type { RunSummary } from "@/lib/schema";
@@ -12,26 +13,28 @@ export function RunsScreen() {
     [error, setError] = useState("");
   useEffect(() => {
     let live = true;
-    const poll = () =>
-      api<RunSummary[]>("/api/runs")
-        .then((r) => {
-          if (live) {
-            setRuns(r);
-            setLoading(false);
-            setError("");
-          }
-        })
-        .catch((e) => {
-          if (live) {
-            setError(e.message);
-            setLoading(false);
-          }
-        });
-    void poll();
-    const t = setInterval(poll, 1500);
+    const stop = startPolling(
+      (signal) =>
+        api<RunSummary[]>("/api/runs", { signal })
+          .then((r) => {
+            if (live) {
+              setRuns(r);
+              setLoading(false);
+              setError("");
+            }
+          })
+          .catch((e) => {
+            if (live) {
+              setError(e.message);
+              setLoading(false);
+            }
+            return false;
+          }),
+      1500,
+    );
     return () => {
       live = false;
-      clearInterval(t);
+      stop();
     };
   }, []);
   const scored = runs.reduce((n, r) => n + r.scoredCount, 0),

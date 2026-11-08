@@ -3,6 +3,44 @@ import { z } from "zod";
 import { isVercel } from "./runtime";
 import { ConflictError } from "./store";
 export function fail(error: unknown) {
+  const databaseCode =
+    error && typeof error === "object" && "code" in error
+      ? String(error.code)
+      : "";
+  if (
+    [
+      "55P03",
+      "57014",
+      "25P03",
+      "53300",
+      "57P01",
+      "57P02",
+      "57P03",
+      "CONNECT_TIMEOUT",
+      "QUEUE_TIMEOUT",
+      "QUERY_TIMEOUT",
+      "CONNECTION_CLOSED",
+      "CONNECTION_ENDED",
+      "CONNECTION_DESTROYED",
+      "CANCEL_UNANSWERED",
+      "ECONNRESET",
+      "ECONNREFUSED",
+      "ETIMEDOUT",
+      "ENOTFOUND",
+      "EAI_AGAIN",
+    ].includes(databaseCode)
+  ) {
+    console.error("Database request unavailable:", { code: databaseCode });
+    return Response.json(
+      {
+        error:
+          "The database is busy or unavailable. Check Vercel Runtime Logs and database activity. Check Runs before starting another batch.",
+        code: "DATABASE_UNAVAILABLE",
+        databaseCode,
+      },
+      { status: 503, headers: { "Retry-After": "5" } },
+    );
+  }
   if (error instanceof StoredStateError) {
     console.error("Stored benchmark state validation failed:", error);
     return Response.json(
