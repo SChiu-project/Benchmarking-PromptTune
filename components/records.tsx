@@ -85,6 +85,7 @@ export function RecordsScreen() {
           setLoading(false);
           setError("");
         }
+        return rr.value.some((run) => run.status === "active") ? 1500 : 30000;
       } catch (e) {
         if (live) {
           setError((e as Error).message);
@@ -108,6 +109,10 @@ export function RecordsScreen() {
             if (live) {
               setDetail(r);
             }
+            return ["queued", "running"].includes(r.execution) ||
+              ["pending", "running"].includes(r.evaluationStatus)
+              ? 1500
+              : 30000;
           })
           .catch((e) => {
             if (live) setDetailError(e.message);
@@ -119,7 +124,7 @@ export function RecordsScreen() {
       live = false;
       stop();
     };
-  }, [detailId]);
+  }, [detailId, retrying]);
   async function retry() {
     if (!detail || retrying) return;
     setRetrying(true);

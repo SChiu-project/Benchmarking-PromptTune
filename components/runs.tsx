@@ -22,6 +22,7 @@ export function RunsScreen() {
               setLoading(false);
               setError("");
             }
+            return r.some((run) => run.status === "active") ? 1500 : 30000;
           })
           .catch((e) => {
             if (live) {

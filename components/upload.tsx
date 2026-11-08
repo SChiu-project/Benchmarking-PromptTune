@@ -74,6 +74,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
           setActiveRun(status.value.activeRun);
           setRecent(runs.value.slice(0, 3));
         }
+        return status.value.activeRun ? 2500 : 30000;
       } catch (error) {
         if (live) setError((error as Error).message);
         return false;

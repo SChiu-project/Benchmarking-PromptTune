@@ -2,6 +2,32 @@ import { afterEach, expect, it, vi } from "vitest";
 import { startPolling } from "../lib/polling";
 afterEach(() => vi.useRealTimers());
 
+it("uses the returned idle interval and refreshes when a hidden page becomes visible", async () => {
+  vi.useFakeTimers();
+  const fakeDocument = new EventTarget() as EventTarget & {
+    visibilityState: string;
+  };
+  fakeDocument.visibilityState = "visible";
+  vi.stubGlobal("document", fakeDocument);
+  const refresh = vi.fn().mockResolvedValue(30000);
+  try {
+    const stop = startPolling(refresh, 100);
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    fakeDocument.visibilityState = "hidden";
+    fakeDocument.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(60000);
+    expect(refresh).toHaveBeenCalledTimes(1);
+    fakeDocument.visibilityState = "visible";
+    fakeDocument.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(refresh).toHaveBeenCalledTimes(2);
+    stop();
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});
+
 it("keeps one refresh in flight even when it takes longer than many polling intervals", async () => {
   vi.useFakeTimers();
   let release!: () => void;

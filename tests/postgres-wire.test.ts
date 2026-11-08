@@ -72,15 +72,49 @@ it("polls existing state with plain SELECTs instead of DDL, INSERTs or write loc
   try {
     await Promise.all(Array.from({ length: 8 }, () => readState()));
     expect(queries).toHaveLength(8);
-    expect(queries.every((q) => q.startsWith("SELECT payload FROM"))).toBe(
-      true,
-    );
+    expect(
+      queries.every((q) => q.startsWith("SELECT xmin::text AS revision")),
+    ).toBe(true);
     expect(queries.join(" ")).not.toMatch(
       /FOR UPDATE|advisory|CREATE|INSERT|BEGIN/i,
     );
   } finally {
     channel.unsubscribe(subscriber);
   }
+});
+
+it("omits an unchanged snapshot from the database response and notices external updates", async () => {
+  await createRun({
+    idempotencyKey: randomUUID(),
+    concurrency: 1,
+    questions: [
+      {
+        query: "first",
+        folder: "folder",
+        expected_answer: "",
+        evaluation_comments: "",
+      },
+    ],
+  });
+  const first = await readState();
+  const [row] = await sql.unsafe(
+    "SELECT xmin::text AS revision FROM doc_benchmark_state WHERE workspace = $1",
+    ["driver-regression"],
+  );
+  const [unchanged] = await sql.unsafe(
+    "SELECT CASE WHEN xmin::text = $2 THEN NULL ELSE payload END AS payload FROM doc_benchmark_state WHERE workspace = $1",
+    ["driver-regression", row.revision],
+  );
+  expect(unchanged.payload).toBeNull();
+  first.runs[0].records[0].question.query = "local mutation";
+  expect((await readState()).runs[0].records[0].question.query).toBe("first");
+  await sql.unsafe(
+    "UPDATE doc_benchmark_state SET payload = jsonb_set(payload, '{runs,0,records,0,question,query}', '\"externally updated\"'::jsonb) WHERE workspace = $1",
+    ["driver-regression"],
+  );
+  expect((await readState()).runs[0].records[0].question.query).toBe(
+    "externally updated",
+  );
 });
 
 it("reads an empty workspace without inserting a snapshot row", async () => {

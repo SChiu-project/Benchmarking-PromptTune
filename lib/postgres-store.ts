@@ -73,6 +73,10 @@ export async function mutateDatabaseSnapshot<T>(
 }
 let client: ReturnType<typeof postgres> | undefined;
 let schemaReady: Promise<void> | undefined;
+// This is only a transfer optimization. PostgreSQL remains the source of truth:
+// every read checks the row's MVCC revision before reusing a local snapshot.
+let snapshotCache:
+  { namespace: string; revision: string; state: State } | undefined;
 // Client-side deadlines also cover pool queues and a server/network that stops replying.
 // These options are supported by the pinned postgres.js 4.x driver.
 export const databaseConnectionOptions = {
@@ -128,18 +132,28 @@ async function ensureSchema(sql: ReturnType<typeof postgres>) {
 export async function readDatabaseSnapshot(): Promise<State> {
   const sql = databaseClient();
   await ensureSchema(sql);
+  const namespace = workspaceNamespace();
+  const cached =
+    snapshotCache?.namespace === namespace ? snapshotCache : undefined;
   // MVCC reads see the last committed state even while a writer holds the row lock.
   // Do not INSERT, take an advisory lock, or run DDL during routine polling.
   const [row] = await sql.unsafe(
-    "SELECT payload FROM doc_benchmark_state WHERE workspace = $1",
-    [workspaceNamespace()],
+    "SELECT xmin::text AS revision, CASE WHEN xmin::text = $2 THEN NULL ELSE payload END AS payload FROM doc_benchmark_state WHERE workspace = $1",
+    [namespace, cached?.revision ?? ""],
   );
-  if (!row) return emptyState();
+  if (!row) {
+    snapshotCache = undefined;
+    return emptyState();
+  }
+  if (row.payload === null && cached && row.revision === cached.revision)
+    return structuredClone(cached.state);
   if (typeof row.payload === "string") {
     decodeSnapshot(row.payload); // Reject invalid data before attempting a repair.
     return databaseTransaction((state) => state);
   }
-  return decodeSnapshot(row.payload);
+  const state = decodeSnapshot(row.payload);
+  snapshotCache = { namespace, revision: row.revision, state };
+  return structuredClone(state);
 }
 
 export async function databaseTransaction<T>(
@@ -160,5 +174,6 @@ export async function closeDatabase() {
   const previous = client;
   client = undefined;
   schemaReady = undefined;
+  snapshotCache = undefined;
   await previous?.end({ timeout: 2 });
 }
