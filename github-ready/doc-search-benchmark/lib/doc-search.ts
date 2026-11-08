@@ -1,0 +1,116 @@
+import { z } from "zod";
+import type { Question, SearchConfig, SearchResult } from "./schema";
+export function searchConfig(): SearchConfig {
+  return {
+    endpoint:
+      process.env.DOC_SEARCH_ENDPOINT ||
+      "https://dev.setsailapi.com/nlp/rag/docSearchConvo",
+    projectId: process.env.DOC_SEARCH_PROJECT_ID || "mtr-air-kiosk-05emf61",
+    timeoutMs: Number(process.env.DOC_SEARCH_TIMEOUT_MS || 60000),
+  };
+}
+export function searchRequest(q: Question, c: SearchConfig) {
+  return {
+    user_queries: [q.query],
+    folder_names: [q.folder],
+    project_id: c.projectId,
+    doc_search_version: 2,
+    stream: false,
+    with_reference: true,
+  };
+}
+const section = z
+  .object({
+    id: z.string().nullish(),
+    doc_name: z.string().min(1),
+    url: z.string().nullish(),
+    content: z.string(),
+  })
+  .passthrough();
+const observed = z
+  .object({
+    message: z
+      .object({
+        series: z.array(z.object({ text: z.string() }).passthrough()).min(1),
+      })
+      .passthrough(),
+    langsmith_trace_id: z.string().nullish(),
+    used_sections: z.unknown().optional(),
+    answering_failed: z.boolean().optional(),
+  })
+  .passthrough();
+export function adaptResponse(
+  raw: unknown,
+): Pick<SearchResult, "answer" | "sources" | "traceId"> {
+  const data = observed.parse(raw);
+  if (data.answering_failed)
+    throw new Error("Doc Search reported answering_failed.");
+  const answer = data.message.series.map((x) => x.text).join("\n");
+  if (!answer.trim()) throw new Error("Doc Search returned an empty answer.");
+  const sources = z.array(section).safeParse(data.used_sections);
+  return {
+    answer,
+    traceId: data.langsmith_trace_id || null,
+    sources: sources.success
+      ? sources.data.map((s) => ({
+          id: s.id ?? null,
+          title: s.doc_name || s.url || s.id || "Retrieved passage",
+          url: s.url ?? null,
+          content: s.content || "",
+          metadata: s,
+        }))
+      : null,
+  };
+}
+export class SearchFailure extends Error {
+  constructor(
+    message: string,
+    public rawRequest: unknown,
+    public rawResponse: unknown = null,
+  ) {
+    super(message);
+  }
+}
+export async function search(
+  q: Question,
+  c: SearchConfig,
+): Promise<SearchResult> {
+  const rawRequest = searchRequest(q, c),
+    start = performance.now();
+  let raw: unknown = null;
+  try {
+    const response = await fetch(c.endpoint, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(rawRequest),
+      signal: AbortSignal.timeout(c.timeoutMs),
+    });
+    const text = await response.text();
+    try {
+      raw = JSON.parse(text);
+    } catch {
+      raw = text;
+      throw new Error(
+        `Doc Search returned invalid JSON (HTTP ${response.status}).`,
+      );
+    }
+    if (!response.ok)
+      throw new Error(`Doc Search HTTP ${response.status}. See raw response.`);
+    return {
+      ...adaptResponse(raw),
+      latencyMs: Math.round(performance.now() - start),
+      rawRequest,
+      rawResponse: raw,
+    };
+  } catch (e) {
+    throw new SearchFailure(
+      e instanceof Error && ["TimeoutError", "AbortError"].includes(e.name)
+        ? "Doc Search timed out; delivery is ambiguous. Request was not retried."
+        : e instanceof Error
+          ? e.message
+          : "Network failure",
+      rawRequest,
+      raw,
+    );
+  }
+}

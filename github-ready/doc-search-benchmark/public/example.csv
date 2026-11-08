@@ -1,0 +1,4 @@
+query,folder,expected_answer,evaluation_comments
+Where is the toilet?,persona_maisie,,Give clear directions and state when exact information is unavailable.
+"Where can I buy a ticket, and how do I get there?",persona_maisie,,Answer both parts of the question.
+What services are available?,,,Keep the answer relevant and concise.
