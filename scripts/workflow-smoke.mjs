@@ -43,6 +43,7 @@ const grade = {
 };
 let searches = 0,
   grades = 0;
+const searchRequests = [];
 const upstream = createServer(async (req, res) => {
   let body = "";
   for await (const chunk of req) body += chunk;
@@ -50,6 +51,7 @@ const upstream = createServer(async (req, res) => {
   res.setHeader("Content-Type", "application/json");
   if (req.url === "/search") {
     searches++;
+    searchRequests.push(value);
     res.end(
       JSON.stringify({
         message: {
@@ -132,6 +134,14 @@ try {
   const payload = {
     idempotencyKey: randomUUID(),
     concurrency: 2,
+    projectId: "mock-project",
+    promptOverrides: {
+      custom_instruction_dto: {
+        en: "Edited instruction",
+        zh: "繁體原文",
+        sc: "简体原文",
+      },
+    },
     questions: [
       {
         query: "Synthetic smoke question 1",
@@ -172,11 +182,45 @@ try {
   assert.equal(run.summary.averageScore, 80);
   assert.equal(searches, 2);
   assert.equal(grades, 2);
+  for (const sent of searchRequests) {
+    assert.equal(sent.project_id, "mock-project");
+    assert.equal(sent.use_cache, false);
+    assert.deepEqual(
+      sent.custom_instruction_dto,
+      payload.promptOverrides.custom_instruction_dto,
+    );
+    assert.equal("agent_background_dto" in sent, false);
+  }
   const page = await (await protectedFetch(base + "/api/records")).json();
   assert.equal(page.total, 2);
   assert.equal(
     page.records[0].evaluation.assessment,
     "Deterministic test assessment.",
+  );
+  const testResponse = await protectedFetch(base + "/api/test", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      idempotencyKey: randomUUID(),
+      question: payload.questions[0],
+      projectId: payload.projectId,
+      promptOverrides: payload.promptOverrides,
+    }),
+  });
+  assert.equal(testResponse.status, 202);
+  const { id: testId } = await testResponse.json();
+  let testRun;
+  for (let i = 0; i < 100; i++) {
+    testRun = await (await protectedFetch(base + `/api/runs/${testId}`)).json();
+    if (testRun.summary.status !== "active") break;
+    await wait(400);
+  }
+  assert.equal(testRun.summary.status, "completed");
+  assert.equal(searches, 3);
+  assert.equal(searchRequests[2].use_cache, false);
+  assert.deepEqual(
+    searchRequests[2].custom_instruction_dto,
+    payload.promptOverrides.custom_instruction_dto,
   );
   if (usePostgres) {
     const stored = await database.query(

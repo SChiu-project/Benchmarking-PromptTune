@@ -107,6 +107,9 @@ export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
     config = configSchema.parse({
       ...searchConfig(),
       ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
+      ...(body.promptOverrides === undefined
+        ? {}
+        : { promptOverrides: body.promptOverrides }),
     });
   if (isVercel() && config.timeoutMs > 180000)
     throw new ConflictError(
@@ -119,6 +122,9 @@ export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
         concurrency: body.concurrency,
         kind,
         ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
+        ...(body.promptOverrides === undefined
+          ? {}
+          : { promptOverrides: body.promptOverrides }),
       }),
     )
     .digest("hex");

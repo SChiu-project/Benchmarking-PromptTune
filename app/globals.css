@@ -856,6 +856,60 @@ th small {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.prompt-editor {
+  border: 1px solid var(--line);
+  border-radius: 7px;
+  padding: 16px;
+  margin: 16px 0 24px;
+  font-size: 12px;
+}
+.prompt-editor summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.prompt-editor summary span {
+  color: #69768b;
+  font-weight: 400;
+  margin-left: 6px;
+}
+.prompt-editor p {
+  color: #69768b;
+  line-height: 1.5;
+  margin: 12px 0;
+}
+.prompt-editor .prompt-warning {
+  color: #a73535;
+}
+.prompt-editor > label:not(.checkbox),
+.prompt-editor fieldset label {
+  display: grid;
+  gap: 6px;
+  margin: 10px 0;
+  font-weight: 600;
+}
+.prompt-editor textarea {
+  width: 100%;
+  resize: vertical;
+  border: 1px solid #dee5ef;
+  border-radius: 6px;
+  padding: 9px;
+  background: white;
+  color: #26354a;
+  font-weight: 400;
+}
+.prompt-editor fieldset {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 14px 0;
+}
+.prompt-editor legend {
+  font-weight: 600;
+  padding: 0 5px;
+}
+.prompt-editor button + button {
+  margin-left: 8px;
+}
 .project-setting {
   display: grid;
   gap: 7px;

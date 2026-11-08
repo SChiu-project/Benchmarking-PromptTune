@@ -1,6 +1,25 @@
 import { z } from "zod";
 export const DEFAULT_FOLDER = "Codex_Benchmark_tool";
 export const projectIdSchema = z.string().trim().min(1).max(500);
+export const localizedPromptSchema = z
+  .object({
+    en: z.string().max(50000),
+    zh: z.string().max(50000),
+    sc: z.string().max(50000),
+  })
+  .strict();
+export const promptOverridesSchema = z
+  .object({
+    agent_background_dto: localizedPromptSchema.optional(),
+    custom_instruction_dto: localizedPromptSchema.optional(),
+    tool_call_context_dto: localizedPromptSchema.optional(),
+  })
+  .strict()
+  .refine(
+    (value) => Object.keys(value).length > 0,
+    "Select at least one changed prompt section.",
+  );
+export type PromptOverrides = z.infer<typeof promptOverridesSchema>;
 export const questionSchema = z.object({
   query: z.string().trim().min(1).max(20000),
   folder: z.string().trim().min(1).max(500),
@@ -87,6 +106,7 @@ export const resultSchema = z.object({
   latencyMs: z.number().nonnegative(),
   rawRequest: z.unknown(),
   rawResponse: z.unknown(),
+  promptVersion: z.record(z.string(), z.string()).optional(),
 });
 export type SearchResult = z.infer<typeof resultSchema>;
 export const attemptSchema = z.object({
@@ -123,6 +143,7 @@ export const configSchema = z.object({
   endpoint: z.url(),
   projectId: z.string().min(1),
   timeoutMs: z.number().int().min(100).max(300000),
+  promptOverrides: promptOverridesSchema.optional(),
 });
 export type SearchConfig = z.infer<typeof configSchema>;
 export const runSchema = z.object({
@@ -152,8 +173,18 @@ export const createRunSchema = z
     concurrency: z.number().int().min(1).max(5),
     questions: z.array(questionSchema).min(1).max(1000),
     projectId: projectIdSchema.optional(),
+    promptOverrides: promptOverridesSchema.optional(),
   })
-  .strict();
+  .strict()
+  .refine(
+    (value) =>
+      !value.promptOverrides ||
+      new Set(value.questions.map((q) => q.folder)).size === 1,
+    {
+      message: "Prompt overrides require questions from one folder.",
+      path: ["questions"],
+    },
+  );
 export type CreateRun = z.infer<typeof createRunSchema>;
 export function summarize(run: Run) {
   const rs = run.records,
@@ -169,6 +200,8 @@ export function summarize(run: Run) {
     createdAt: run.createdAt,
     status: run.status,
     concurrency: run.concurrency,
+    projectId: run.config.projectId,
+    promptSections: Object.keys(run.config.promptOverrides ?? {}),
     total: rs.length,
     completed: rs.filter((r) =>
       ["succeeded", "failed", "interrupted"].includes(r.execution),

@@ -17,6 +17,7 @@ export function searchRequest(q: Question, c: SearchConfig) {
     doc_search_version: 2,
     stream: false,
     with_reference: true,
+    ...(c.promptOverrides ? { ...c.promptOverrides, use_cache: false } : {}),
   };
 }
 const section = z
@@ -41,13 +42,20 @@ const observed = z
   .passthrough();
 export function adaptResponse(
   raw: unknown,
-): Pick<SearchResult, "answer" | "sources" | "traceId"> {
+): Pick<SearchResult, "answer" | "sources" | "traceId" | "promptVersion"> {
   const data = observed.parse(raw);
   if (data.answering_failed)
     throw new Error("Doc Search reported answering_failed.");
   const answer = data.message.series.map((x) => x.text).join("\n");
   if (!answer.trim()) throw new Error("Doc Search returned an empty answer.");
   const sources = z.array(section).safeParse(data.used_sections);
+  const promptVersion = z
+    .record(z.string(), z.string())
+    .safeParse(
+      raw && typeof raw === "object" && "_prompt_version" in raw
+        ? raw._prompt_version
+        : undefined,
+    );
   return {
     answer,
     traceId: data.langsmith_trace_id || null,
@@ -60,6 +68,7 @@ export function adaptResponse(
           metadata: s,
         }))
       : null,
+    ...(promptVersion.success ? { promptVersion: promptVersion.data } : {}),
   };
 }
 export class SearchFailure extends Error {

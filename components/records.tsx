@@ -179,6 +179,10 @@ export function RecordsScreen() {
           <div>
             <span className="mono">Run {run.id.slice(0, 8)}</span>
             <Badge value={run.status} />
+            <span>Project: {run.projectId}</span>
+            {run.promptSections.length > 0 && (
+              <span>Prompt test: {run.promptSections.join(", ")}</span>
+            )}
             <span>
               {run.completed} / {run.total} responses
             </span>
@@ -690,6 +694,12 @@ export function RecordsScreen() {
                       <CopyButton text={detail.result.traceId} />
                     )}
                   </div>
+                  {detail.result?.promptVersion && (
+                    <p>
+                      Reported prompt version:{" "}
+                      <code>{JSON.stringify(detail.result.promptVersion)}</code>
+                    </p>
+                  )}
                   <dl className="timing-grid">
                     <div>
                       <dt>Created</dt>

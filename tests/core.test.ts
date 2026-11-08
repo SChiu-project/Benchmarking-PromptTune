@@ -26,6 +26,7 @@ import { Engine } from "../lib/engine";
 import {
   summarize,
   stateSchema,
+  createRunSchema,
   type Question,
   type SearchResult,
 } from "../lib/schema";
@@ -250,6 +251,88 @@ describe("evaluation", () => {
   });
 });
 describe("durable queue", () => {
+  it("snapshots complete prompt overrides, disables cache, and preserves idempotency", async () => {
+    const overrides = {
+      custom_instruction_dto: { en: "revised", zh: "繁體原文", sc: "简体原文" },
+    };
+    const input = {
+      idempotencyKey: randomUUID(),
+      concurrency: 1,
+      projectId: "project-a",
+      questions: [question()],
+      promptOverrides: overrides,
+    };
+    const id = await createRun(input);
+    overrides.custom_instruction_dto.en = "changed after submission";
+    const run = (await readState()).runs.find((value) => value.id === id)!;
+    expect(run.config.promptOverrides?.custom_instruction_dto?.en).toBe(
+      "revised",
+    );
+    const request = searchRequest(question(), run.config);
+    expect(request).toMatchObject({
+      project_id: "project-a",
+      use_cache: false,
+      custom_instruction_dto: { en: "revised", zh: "繁體原文", sc: "简体原文" },
+    });
+    expect(request).not.toHaveProperty("agent_background_dto");
+    expect(request).not.toHaveProperty("tool_call_context_dto");
+    expect(searchRequest(question(), searchConfig())).not.toHaveProperty(
+      "use_cache",
+    );
+    await expect(createRun(input)).rejects.toThrow("different batch");
+    const reordered = {
+      ...input,
+      promptOverrides: {
+        custom_instruction_dto: {
+          sc: "简体原文",
+          en: "revised",
+          zh: "繁體原文",
+        },
+      },
+    };
+    expect(await createRun(reordered)).toBe(id);
+  });
+  it("rejects partial languages, unsupported overrides, empty overrides and mixed folders", () => {
+    const base = {
+      idempotencyKey: randomUUID(),
+      concurrency: 1,
+      questions: [question()],
+    };
+    expect(
+      createRunSchema.safeParse({
+        ...base,
+        promptOverrides: { agent_background_dto: { en: "only" } },
+      }).success,
+    ).toBe(false);
+    expect(
+      createRunSchema.safeParse({
+        ...base,
+        promptOverrides: { tool_call_prompts: {} },
+      }).success,
+    ).toBe(false);
+    expect(
+      createRunSchema.safeParse({ ...base, promptOverrides: {} }).success,
+    ).toBe(false);
+    expect(
+      createRunSchema.safeParse({
+        ...base,
+        questions: [question(), { ...question("other"), folder: "other" }],
+        promptOverrides: {
+          agent_background_dto: { en: "a", zh: "b", sc: "c" },
+        },
+      }).success,
+    ).toBe(false);
+  });
+  it("retains a reported prompt version without requiring it for older responses", () => {
+    const raw = {
+      message: { series: [{ text: "answer" }] },
+      _prompt_version: { folder: "base" },
+    };
+    expect(adaptResponse(raw).promptVersion).toEqual({ folder: "base" });
+    expect(
+      adaptResponse({ message: raw.message }).promptVersion,
+    ).toBeUndefined();
+  });
   it("snapshots a validated project ID for tests and batches and includes it in idempotency", async () => {
     const body = {
       idempotencyKey: randomUUID(),

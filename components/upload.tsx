@@ -18,7 +18,8 @@ import {
   Info,
 } from "lucide-react";
 import type { CsvReview } from "@/lib/csv";
-import type { RunSummary, RecordData } from "@/lib/schema";
+import type { RunSummary, RecordData, PromptOverrides } from "@/lib/schema";
+import { PromptEditor } from "./prompt-editor";
 import {
   api,
   ErrorBox,
@@ -47,6 +48,11 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     [activeRun, setActiveRun] = useState<RunSummary | null>(null),
     [configured, setConfigured] = useState<boolean | null>(null),
     [projectId, setProjectId] = useState(""),
+    [promptOverrides, setPromptOverrides] = useState<
+      PromptOverrides | undefined
+    >(),
+    [promptBlocked, setPromptBlocked] = useState(false),
+    [promptEditorKey, setPromptEditorKey] = useState(0),
     [testId, setTestId] = useState(""),
     [testing, setTesting] = useState(false),
     [test, setTest] = useState<RecordData | null>(null),
@@ -138,6 +144,9 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
       setTest(null);
       setTestError("");
       setConcurrency(3);
+      setPromptOverrides(undefined);
+      setPromptBlocked(false);
+      setPromptEditorKey((value) => value + 1);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -157,6 +166,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         body: JSON.stringify({
           question: review.questions[0],
           projectId: projectId.trim(),
+          promptOverrides,
           idempotencyKey: crypto.randomUUID(),
         }),
       });
@@ -179,6 +189,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
           questions: review.questions,
           concurrency,
           projectId: projectId.trim(),
+          promptOverrides,
           idempotencyKey: submissionKey.current,
         }),
       });
@@ -191,6 +202,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
   }
   const blocked =
     !review?.questions.length ||
+    promptBlocked ||
     !projectId.trim() ||
     projectId.trim().length > 500 ||
     Boolean(review.errors.length) ||
@@ -529,7 +541,11 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                 maxLength={500}
                 disabled={testing || starting}
                 onChange={(event) => {
+                  projectInitialized.current = true;
                   setProjectId(event.target.value);
+                  setPromptOverrides(undefined);
+                  setPromptBlocked(false);
+                  setPromptEditorKey((value) => value + 1);
                   submissionKey.current = crypto.randomUUID();
                   setTest(null);
                   setTestId("");
@@ -542,6 +558,24 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                 Required.
               </p>
             </div>
+            <PromptEditor
+              key={promptEditorKey}
+              projectId={projectId.trim()}
+              folder={
+                Object.keys(review.folders).length === 1
+                  ? Object.keys(review.folders)[0]
+                  : null
+              }
+              disabled={testing || starting}
+              onChange={(overrides, invalid) => {
+                setPromptOverrides(overrides);
+                setPromptBlocked(invalid);
+                submissionKey.current = crypto.randomUUID();
+                setTest(null);
+                setTestId("");
+                setTestError("");
+              }}
+            />
             <div className="folder-tags">
               {Object.entries(review.folders).map(([folder, n]) => (
                 <span key={folder}>
@@ -636,6 +670,12 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                       <CopyButton text={test.result.traceId} />
                     )}
                   </div>
+                  {test.result?.promptVersion && (
+                    <p>
+                      Reported prompt version:{" "}
+                      <code>{JSON.stringify(test.result.promptVersion)}</code>
+                    </p>
+                  )}
                   {test.result?.sources && (
                     <details>
                       <summary>

@@ -70,6 +70,25 @@ async function run(queries = 1) {
   });
   return (await readState()).runs.find((r) => r.id === id)!;
 }
+it("passes the persisted project and complete prompt override to the hosted search worker", async () => {
+  const promptOverrides = {
+    agent_background_dto: { en: "edited", zh: "原文", sc: "原文简体" },
+  };
+  const id = await createRun({
+    idempotencyKey: randomUUID(),
+    concurrency: 1,
+    projectId: "selected-project",
+    questions: [q()],
+    promptOverrides,
+  });
+  const record = (await readState()).runs[0].records[0];
+  const search = vi.fn().mockResolvedValue(result);
+  await processCloudSearch(id, record.id, 0, { ...deps, search });
+  expect(search).toHaveBeenCalledWith(
+    record.question,
+    expect.objectContaining({ projectId: "selected-project", promptOverrides }),
+  );
+});
 it("does not resend a running or ambiguous search on duplicate delivery", async () => {
   const r = await run();
   let release!: () => void;
