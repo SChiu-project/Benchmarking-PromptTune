@@ -1,13 +1,17 @@
 import { dispatchRun } from "@/lib/dispatch";
 import { createRun } from "@/lib/store";
-import { questionSchema } from "@/lib/schema";
+import { projectIdSchema, questionSchema } from "@/lib/schema";
 import { fail, jsonBody } from "@/lib/http";
 import { z } from "zod";
 export const runtime = "nodejs";
 export async function POST(req: Request) {
   try {
     const body = z
-      .object({ question: questionSchema, idempotencyKey: z.uuid() })
+      .object({
+        question: questionSchema,
+        idempotencyKey: z.uuid(),
+        projectId: projectIdSchema.optional(),
+      })
       .strict()
       .parse(await jsonBody(req));
     const id = await createRun(
@@ -15,6 +19,7 @@ export async function POST(req: Request) {
         questions: [body.question],
         idempotencyKey: body.idempotencyKey,
         concurrency: 1,
+        projectId: body.projectId,
       },
       "test",
     );

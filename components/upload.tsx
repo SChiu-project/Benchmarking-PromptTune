@@ -33,7 +33,8 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
   const router = useRouter(),
     input = useRef<HTMLInputElement>(null),
     submitting = useRef(false),
-    submissionKey = useRef("");
+    submissionKey = useRef(""),
+    projectInitialized = useRef(false);
   const [review, setReview] = useState<CsvReview | null>(null),
     [fileName, setFileName] = useState(""),
     [loading, setLoading] = useState(false),
@@ -45,6 +46,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     [recent, setRecent] = useState<RunSummary[]>([]),
     [activeRun, setActiveRun] = useState<RunSummary | null>(null),
     [configured, setConfigured] = useState<boolean | null>(null),
+    [projectId, setProjectId] = useState(""),
     [testId, setTestId] = useState(""),
     [testing, setTesting] = useState(false),
     [test, setTest] = useState<RecordData | null>(null),
@@ -54,16 +56,21 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     const stop = startPolling(async (signal) => {
       try {
         const [status, runs] = await Promise.allSettled([
-          api<{ evaluatorConfigured: boolean; activeRun: RunSummary | null }>(
-            "/api/status",
-            { signal },
-          ),
+          api<{
+            evaluatorConfigured: boolean;
+            activeRun: RunSummary | null;
+            defaultProjectId: string;
+          }>("/api/status", { signal }),
           api<RunSummary[]>("/api/runs", { signal }),
         ]);
         if (status.status === "rejected") throw status.reason;
         if (runs.status === "rejected") throw runs.reason;
         if (live) {
           setConfigured(status.value.evaluatorConfigured);
+          if (!projectInitialized.current) {
+            setProjectId(status.value.defaultProjectId);
+            projectInitialized.current = true;
+          }
           setActiveRun(status.value.activeRun);
           setRecent(runs.value.slice(0, 3));
         }
@@ -148,6 +155,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: review.questions[0],
+          projectId: projectId.trim(),
           idempotencyKey: crypto.randomUUID(),
         }),
       });
@@ -169,6 +177,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         body: JSON.stringify({
           questions: review.questions,
           concurrency,
+          projectId: projectId.trim(),
           idempotencyKey: submissionKey.current,
         }),
       });
@@ -181,6 +190,8 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
   }
   const blocked =
     !review?.questions.length ||
+    !projectId.trim() ||
+    projectId.trim().length > 500 ||
     Boolean(review.errors.length) ||
     Boolean(review.conflicts.length && !resolved);
   const activeNotice = activeRun && (
@@ -509,6 +520,27 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                 </small>
               </div>
             )}
+            <div className="project-setting">
+              <label htmlFor="project-id">Doc Search project ID</label>
+              <input
+                id="project-id"
+                value={projectId}
+                maxLength={500}
+                disabled={testing || starting}
+                onChange={(event) => {
+                  setProjectId(event.target.value);
+                  submissionKey.current = crypto.randomUUID();
+                  setTest(null);
+                  setTestId("");
+                  setTestError("");
+                }}
+                aria-describedby="project-id-help"
+              />
+              <p id="project-id-help">
+                Used for the connectivity test and every question in this batch.
+                Required.
+              </p>
+            </div>
             <div className="folder-tags">
               {Object.entries(review.folders).map(([folder, n]) => (
                 <span key={folder}>

@@ -856,6 +856,30 @@ th small {
   white-space: pre-wrap;
   overflow-wrap: anywhere;
 }
+.project-setting {
+  display: grid;
+  gap: 7px;
+  margin: 22px 0;
+}
+.project-setting label {
+  font-weight: 600;
+  font-size: 12px;
+}
+.project-setting input {
+  width: 100%;
+  max-width: 480px;
+  min-height: 38px;
+  padding: 8px 10px;
+  border: 1px solid #dee5ef;
+  border-radius: 6px;
+  color: #26354a;
+  background: white;
+}
+.project-setting p {
+  margin: 0;
+  color: #69768b;
+  font-size: 11px;
+}
 .test-section {
   border-top: 1px solid var(--line);
   padding-top: 22px;

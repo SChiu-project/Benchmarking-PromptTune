@@ -1,5 +1,6 @@
 import { z } from "zod";
 export const DEFAULT_FOLDER = "Codex_Benchmark_tool";
+export const projectIdSchema = z.string().trim().min(1).max(500);
 export const questionSchema = z.object({
   query: z.string().trim().min(1).max(20000),
   folder: z.string().trim().min(1).max(500),
@@ -150,6 +151,7 @@ export const createRunSchema = z
     idempotencyKey: z.uuid(),
     concurrency: z.number().int().min(1).max(5),
     questions: z.array(questionSchema).min(1).max(1000),
+    projectId: projectIdSchema.optional(),
   })
   .strict();
 export type CreateRun = z.infer<typeof createRunSchema>;

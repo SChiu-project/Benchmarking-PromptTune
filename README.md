@@ -47,7 +47,7 @@ Columns: required `query`; optional `folder`, `expected_answer`, `evaluation_com
 
 Headers and values are trimmed; empty queries are counted/skipped. An empty folder becomes `Codex_Benchmark_tool` before exact, case-sensitive deduplication using JSON tuple keys. The first occurrence wins. Conflicting duplicate criteria block starting until explicitly resolved or corrected in a reupload. Identical queries in different folders remain; previous runs are never deduplicated.
 
-Review shows row/folder counts, preview, errors/conflicts, a separate first-query test, and concurrency 1–5 (default 3). Starting a batch still runs every retained question. A connectivity test uses the same concurrency/storage protections but is hidden from benchmark history.
+Review shows row/folder counts, preview, errors/conflicts, an editable Doc Search project ID, a separate first-query test, and concurrency 1–5 (default 3). The project ID starts with the server's `DOC_SEARCH_PROJECT_ID` default and applies to both the test and batch; each run retains its selected ID. Starting a batch still runs every retained question. A connectivity test uses the same concurrency/storage protections but is hidden from benchmark history.
 
 Runs show terminal search progress, separate execution/grading counts, and averages. Records support run/folder/status filters, full-dataset query search, pagination, score explanations and expandable dimension weights/evidence. Details include full answers, references/comments, sources/metadata, raw JSON, timing, trace copy, discrepancies and evaluation history. Text renders as plain React text; source links allow HTTP(S) only.
 

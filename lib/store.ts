@@ -104,7 +104,10 @@ export function recover(s: State) {
 }
 export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
   const body = createRunSchema.parse(input),
-    config = configSchema.parse(searchConfig());
+    config = configSchema.parse({
+      ...searchConfig(),
+      ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
+    });
   if (isVercel() && config.timeoutMs > 180000)
     throw new ConflictError(
       "Hosted Doc Search timeout must not exceed 180000 ms.",
@@ -115,6 +118,7 @@ export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
         questions: body.questions,
         concurrency: body.concurrency,
         kind,
+        ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
       }),
     )
     .digest("hex");
