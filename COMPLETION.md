@@ -60,3 +60,18 @@ Not verified without that live project: hosted PostgreSQL network/TLS connectivi
 ## Deliberate limits
 
 One shared authenticated workspace; no per-user accounts, tenancy or roles. One active run per workspace. Database snapshots are an MVP persistence model and become slower with very large histories. Source counts are retrieved passages, not unique verified citations. Hosted uploads are capped at 1 MB, local uploads at 5 MB; input row cap is 1,000. Records use 50-row pages. LLM assessments remain evidence-based but fallible; unavailable/unscored values are not zeros. Local history is not automatically uploaded.
+
+## CMS prompt loading — 2026-11-15
+
+Implemented read-only CMS loading in the existing prompt editor, with exact source selection, three language views, changed-section labels, reset/reload controls, base-configuration labeling and manual JSON fallback. New `/api/cms/prompts/load` and `/check` routes use workspace authentication, same-origin validation, a server-side project allowlist and the verified llmGraph session headers. Local setup uses an explicitly configured connector session file; hosted deployments require private token/UID configuration and manual renewal.
+
+Baselines live in a bounded, expiring collection within the transactional local/PostgreSQL workspace state. Each test/run owns immutable baseline/provenance and changed DTOs. Server submission checks reject cross-scope/stale snapshots, calculate changes against the stored baseline, and preserve all three languages. New CMS-backed submission identities include canonical source identity, baseline fingerprint/version, edits and cache policy. Workers use the persisted configuration without retrieving CMS per question. Old history/manual overrides remain supported.
+
+Verification for this feature:
+
+- 22 CMS-specific tests passed, including route authentication/errors, limits, language validation, base checks, stale acknowledgement, scope isolation, idempotency, PostgreSQL JSONB and worker behavior after credentials disappear.
+- Full release unit/integration suite: 108 tests passed across 12 files. Production build, standard-output verification, TypeScript and lint checks passed.
+- Live `pnpm cms:check` loaded MTR ROOT v19 with all supported fields. A controlled dev call loaded persona_maisie v3, persisted a temporary baseline, sent only custom instructions with unchanged zh/sc values and `use_cache:false`, returned the requested harmless marker, and left CMS content/version unchanged on follow-up read. Temporary benchmark state was removed; no CMS write was made. Trace ID: `57890a9b92e7ee8014069a4b46e7e8e7`.
+- The fresh trace was not inspected: this connector has no Langfuse trace server configured. Answer-marker evidence is weaker than effective-LLM-input trace evidence, and is not presented as complete runtime verification. A prompt version was not reported in this response.
+- The initial Workflow smoke failed against the old evaluation fixture. After updating that fixture for the evaluation upgrade, the release check passed for both local JSON and the PostgreSQL production driver, including saved-answer campaign regrading. CMS persistence/worker tests also pass independently.
+- No new interactive browser QA or live hosted deployment was performed. Hosted auth renewal, production CMS semantics, and full effective-prompt reproducibility remain outside what was verified. Setup and limits: `CMS_PROMPTS.md`.

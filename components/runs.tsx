@@ -38,11 +38,18 @@ export function RunsScreen() {
       stop();
     };
   }, []);
-  const scored = runs.reduce((n, r) => n + r.scoredCount, 0),
-    avg = scored
-      ? runs.reduce((n, r) => n + (r.averageScore ?? 0) * r.scoredCount, 0) /
-        scored
-      : null;
+  async function regrade(id: string) {
+    try {
+      await api(`/api/runs/${id}/evaluate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: "{}",
+      });
+      router.push(`/records?run=${id}`);
+    } catch (e) {
+      setError((e as Error).message);
+    }
+  }
   return (
     <>
       <div className="page-heading heading-action">
@@ -70,7 +77,11 @@ export function RunsScreen() {
             value: runs.reduce((n, r) => n + r.searchSucceeded, 0),
             icon: CheckCircle2,
           },
-          { label: "Average fulfillment", value: percent(avg), icon: Target },
+          {
+            label: "Cases needing review",
+            value: runs.reduce((n, r) => n + r.review, 0),
+            icon: Target,
+          },
         ].map((m) => (
           <div className="panel metric" key={m.label}>
             <span>
@@ -116,7 +127,7 @@ export function RunsScreen() {
                     Evaluation<small>complete / failed / skipped</small>
                   </th>
                   <th>Avg. latency</th>
-                  <th>Avg. fulfillment</th>
+                  <th>Mean score / decisions</th>
                 </tr>
               </thead>
               <tbody>
@@ -134,6 +145,16 @@ export function RunsScreen() {
                         {r.id.slice(0, 8)} <span>↗</span>
                       </Link>
                       <small>{date(r.createdAt)}</small>
+                      <button
+                        className="button secondary small"
+                        disabled={runs.some((r) => r.status === "active")}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          void regrade(r.id);
+                        }}
+                      >
+                        Regrade saved answers
+                      </button>
                     </td>
                     <td>
                       <Badge value={r.status} />
@@ -169,7 +190,30 @@ export function RunsScreen() {
                       <strong className="score">
                         {percent(r.averageScore)}
                       </strong>
-                      <small>{r.scoredCount} scored</small>
+                      <small>
+                        {r.scoredCount} scored
+                        {r.legacyScored ? ` · ${r.legacyScored} legacy` : ""}
+                      </small>
+                      <small>
+                        {r.passed} pass / {r.failed} fail / {r.review} review
+                      </small>
+                      <small>
+                        {r.criticalFailures} critical failures ·{" "}
+                        {r.unassessable} unassessable
+                      </small>
+                      <small>
+                        Pass rate {percent(r.passRate)} · coverage{" "}
+                        {percent(r.evaluationCoverage)}
+                      </small>
+                      <small>
+                        Operational success {percent(r.operationalSuccessRate)}
+                      </small>
+                      {r.mixedEvaluationVersions && (
+                        <small>
+                          Mixed evaluator versions; mean and pass rate
+                          suppressed
+                        </small>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -180,9 +224,10 @@ export function RunsScreen() {
       </section>
       <p className="metrics-note">
         Progress includes terminal Doc Search records. Average latency includes
-        successful requests only. Average fulfillment includes successfully
-        graded records only; unscored answers are excluded. A run stays active
-        until both queues finish.
+        successful requests only. Pass rate excludes review and unassessable
+        cases; counts and coverage remain visible. Means are suppressed across
+        incompatible evaluator policies. Legacy scores are holistic ratings. A
+        run stays active until both queues finish.
       </p>
     </>
   );

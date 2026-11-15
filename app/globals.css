@@ -1857,3 +1857,50 @@ pre {
   font-size: 11px;
   color: var(--muted);
 }
+
+.criteria-editor {
+  border: 1px solid var(--border, #dde2e6);
+  border-radius: 12px;
+  padding: 18px;
+  margin: 18px 0;
+}
+.criteria-editor label {
+  display: block;
+  margin: 10px 0;
+}
+.criteria-editor label.checkbox {
+  display: flex;
+}
+.criteria-json {
+  width: 100%;
+  resize: vertical;
+  font-family: monospace;
+  font-size: 12px;
+  padding: 10px;
+}
+.requirement-row {
+  padding: 12px 0;
+  border-bottom: 1px solid var(--border, #dde2e6);
+}
+.requirement-row blockquote {
+  margin: 8px 0;
+  padding-left: 12px;
+  border-left: 3px solid #b8c4ce;
+  white-space: pre-wrap;
+}
+.evaluation-decision {
+  display: inline-block;
+  margin: 4px 0;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.prompt-editor > input {
+  width: 100%; max-width: 480px; padding: 9px; border: 1px solid var(--line); border-radius: 6px;
+}
+.prompt-actions, .prompt-language-tabs {
+  display: flex; flex-wrap: wrap; gap: 8px; margin: 12px 0;
+}
+.prompt-editor .prompt-actions button, .prompt-editor .prompt-language-tabs button { margin-left: 0; }
+.prompt-source { background: #f5f8fc; padding: 12px; border-radius: 6px; margin-top: 12px; overflow-wrap: anywhere; }
+.prompt-editor fieldset.prompt-changed { border-color: #5377c8; }

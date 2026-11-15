@@ -7,6 +7,7 @@ import {
 } from "@/lib/schema";
 import { fail, jsonBody } from "@/lib/http";
 import { z } from "zod";
+import { promptSelectionSchema } from "@/lib/prompt-schema";
 export const runtime = "nodejs";
 export async function POST(req: Request) {
   try {
@@ -16,6 +17,7 @@ export async function POST(req: Request) {
         idempotencyKey: z.uuid(),
         projectId: projectIdSchema.optional(),
         promptOverrides: promptOverridesSchema.optional(),
+        promptSelection: promptSelectionSchema.optional(),
       })
       .strict()
       .parse(await jsonBody(req));
@@ -26,6 +28,7 @@ export async function POST(req: Request) {
         concurrency: 1,
         projectId: body.projectId,
         promptOverrides: body.promptOverrides,
+        promptSelection: body.promptSelection,
       },
       "test",
     );

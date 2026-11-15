@@ -1,30 +1,28 @@
 import { z } from "zod";
+import {
+  criteriaSchema,
+  requirementResultSchema,
+  campaignSchema,
+} from "./evaluation-contract";
 export const DEFAULT_FOLDER = "Codex_Benchmark_tool";
 export const projectIdSchema = z.string().trim().min(1).max(500);
-export const localizedPromptSchema = z
-  .object({
-    en: z.string().max(50000),
-    zh: z.string().max(50000),
-    sc: z.string().max(50000),
-  })
-  .strict();
-export const promptOverridesSchema = z
-  .object({
-    agent_background_dto: localizedPromptSchema.optional(),
-    custom_instruction_dto: localizedPromptSchema.optional(),
-    tool_call_context_dto: localizedPromptSchema.optional(),
-  })
-  .strict()
-  .refine(
-    (value) => Object.keys(value).length > 0,
-    "Select at least one changed prompt section.",
-  );
-export type PromptOverrides = z.infer<typeof promptOverridesSchema>;
+import {
+  promptOverridesSchema,
+  promptSnapshotSchema,
+  promptSelectionSchema,
+  promptProvenanceSchema,
+} from "./prompt-schema";
+export {
+  localizedPromptSchema,
+  promptOverridesSchema,
+  type PromptOverrides,
+} from "./prompt-schema";
 export const questionSchema = z.object({
   query: z.string().trim().min(1).max(20000),
   folder: z.string().trim().min(1).max(500),
   expected_answer: z.string().trim().max(50000).default(""),
   evaluation_comments: z.string().trim().max(50000).default(""),
+  criteria: criteriaSchema.optional(),
 });
 export type Question = z.infer<typeof questionSchema>;
 export const executionSchema = z.enum([
@@ -90,6 +88,15 @@ export const evaluatorOutputSchema = z
 export const evaluationSchema = evaluatorOutputSchema.extend({
   score: z.number().min(0).max(100).nullable(),
   applicableWeights: z.record(z.string(), z.number().min(0).max(100)),
+  requirements: requirementResultSchema.optional(),
+  providerModel: z.string().optional(),
+  usage: z
+    .object({
+      prompt_tokens: z.number().int().nonnegative().optional(),
+      completion_tokens: z.number().int().nonnegative().optional(),
+      total_tokens: z.number().int().nonnegative().optional(),
+    })
+    .optional(),
 });
 export type Evaluation = z.infer<typeof evaluationSchema>;
 export const sourceSchema = z.object({
@@ -114,6 +121,10 @@ export const attemptSchema = z.object({
   model: z.string(),
   endpoint: z.string(),
   rubricVersion: z.string(),
+  campaign: campaignSchema.optional(),
+  questionSnapshot: questionSchema.optional(),
+  evidenceHash: z.string().length(64).optional(),
+  providerModel: z.string().optional(),
   startedAt: z.iso.datetime(),
   finishedAt: z.iso.datetime().optional(),
   status: z.enum(["running", "succeeded", "failed", "skipped"]),
@@ -137,6 +148,7 @@ export const recordSchema = z.object({
   evaluationReason: z.string().optional(),
   evaluation: evaluationSchema.optional(),
   attempts: z.array(attemptSchema),
+  queuedCampaign: campaignSchema.optional(),
 });
 export type RecordData = z.infer<typeof recordSchema>;
 export const configSchema = z.object({
@@ -144,6 +156,7 @@ export const configSchema = z.object({
   projectId: z.string().min(1),
   timeoutMs: z.number().int().min(100).max(300000),
   promptOverrides: promptOverridesSchema.optional(),
+  promptProvenance: promptProvenanceSchema.optional(),
 });
 export type SearchConfig = z.infer<typeof configSchema>;
 export const runSchema = z.object({
@@ -156,6 +169,7 @@ export const runSchema = z.object({
   status: z.enum(["active", "completed", "interrupted"]),
   concurrency: z.number().int().min(1).max(5),
   config: configSchema,
+  campaign: campaignSchema.optional(),
   generation: z.number().int().nonnegative().optional(),
   workflowRunId: z.string().optional(),
   dispatchError: z.string().optional(),
@@ -165,6 +179,7 @@ export type Run = z.infer<typeof runSchema>;
 export const stateSchema = z.object({
   version: z.literal(1),
   runs: z.array(runSchema),
+  promptSnapshots: z.array(promptSnapshotSchema).max(20).optional(),
 });
 export type State = z.infer<typeof stateSchema>;
 export const createRunSchema = z
@@ -174,11 +189,12 @@ export const createRunSchema = z
     questions: z.array(questionSchema).min(1).max(1000),
     projectId: projectIdSchema.optional(),
     promptOverrides: promptOverridesSchema.optional(),
+    promptSelection: promptSelectionSchema.optional(),
   })
   .strict()
   .refine(
     (value) =>
-      !value.promptOverrides ||
+      (!value.promptOverrides && !value.promptSelection) ||
       new Set(value.questions.map((q) => q.folder)).size === 1,
     {
       message: "Prompt overrides require questions from one folder.",
@@ -192,6 +208,30 @@ export function summarize(run: Run) {
     scored = rs.filter(
       (r) => r.evaluationStatus === "succeeded" && r.evaluation?.score != null,
     );
+  const requirementRecords = rs.filter(
+    (r) => r.evaluationStatus === "succeeded" && r.evaluation?.requirements,
+  );
+  const signatures = new Set(
+    rs
+      .filter((r) => r.evaluationStatus === "succeeded" && r.evaluation)
+      .map((r) =>
+        JSON.stringify({
+          rubric: r.evaluation?.requirements?.rubricVersion ?? "legacy",
+          criteriaVersion: r.evaluation?.requirements?.criteriaVersion,
+          policy: r.question.criteria?.policy,
+          judge: r.attempts.at(-1)?.campaign?.evaluator,
+        }),
+      ),
+  );
+  const passed = requirementRecords.filter(
+    (r) => r.evaluation!.requirements!.decision === "pass",
+  ).length;
+  const failed = requirementRecords.filter(
+    (r) => r.evaluation!.requirements!.decision === "fail",
+  ).length;
+  const review = requirementRecords.filter(
+    (r) => r.evaluation!.requirements!.decision === "review",
+  ).length;
   const mean = (xs: number[]) =>
     xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
   return {
@@ -202,6 +242,16 @@ export function summarize(run: Run) {
     concurrency: run.concurrency,
     projectId: run.config.projectId,
     promptSections: Object.keys(run.config.promptOverrides ?? {}),
+    promptSource: run.config.promptProvenance
+      ? {
+          folder: run.config.promptProvenance.snapshot.promptFolder,
+          isBase: run.config.promptProvenance.snapshot.isBase,
+          version: run.config.promptProvenance.snapshot.version,
+          fingerprint: run.config.promptProvenance.snapshot.fingerprint,
+          environment: run.config.promptProvenance.snapshot.environment,
+          staleAcknowledged: run.config.promptProvenance.staleAcknowledged,
+        }
+      : undefined,
     total: rs.length,
     completed: rs.filter((r) =>
       ["succeeded", "failed", "interrupted"].includes(r.execution),
@@ -213,7 +263,32 @@ export function summarize(run: Run) {
     evaluationFailed: rs.filter((r) => r.evaluationStatus === "failed").length,
     skipped: rs.filter((r) => r.evaluationStatus === "skipped").length,
     averageLatency: mean(successful.map((r) => r.result!.latencyMs)),
-    averageScore: mean(scored.map((r) => r.evaluation!.score!)),
+    averageScore:
+      signatures.size <= 1
+        ? mean(scored.map((r) => r.evaluation!.score!))
+        : null,
+    mixedEvaluationVersions: signatures.size > 1,
+    passed,
+    failed,
+    review,
+    criticalFailures: requirementRecords.filter(
+      (r) => r.evaluation!.requirements!.criticalFailures.length > 0,
+    ).length,
+    passRate:
+      signatures.size <= 1 && passed + failed
+        ? (100 * passed) / (passed + failed)
+        : null,
+    evaluationCoverage: rs.length
+      ? (100 * requirementRecords.length) / rs.length
+      : null,
+    operationalSuccessRate: rs.length
+      ? (100 * successful.length) / rs.length
+      : null,
+    legacyScored: scored.filter((r) => !r.evaluation!.requirements).length,
+    unassessable: requirementRecords.filter(
+      (r) => !r.evaluation!.requirements!.applicableWeight,
+    ).length,
+    campaignId: run.campaign?.id,
     scoredCount: scored.length,
     dispatchError: run.dispatchError,
     workflowRunId: run.workflowRunId,

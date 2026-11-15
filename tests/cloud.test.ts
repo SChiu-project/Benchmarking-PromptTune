@@ -128,6 +128,10 @@ it("does not resend a running or ambiguous search on duplicate delivery", async 
 });
 it("enforces persisted concurrency caps even across independent queue invocations and isolates failures", async () => {
   const r = await run(10);
+  // Regression coverage for pre-v2 saved runs.
+  await transaction((s) => {
+    delete s.runs[0].campaign;
+  });
   let active = 0,
     max = 0,
     eactive = 0,

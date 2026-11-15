@@ -1,0 +1,74 @@
+{
+  "version": 1,
+  "cases": [
+    {
+      "query": "Synthetic example: where is the accessible toilet and how do I get there without stairs?",
+      "folder": "Codex_Benchmark_tool",
+      "criteria": {
+        "version": "criteria-v1",
+        "caseId": "accessible-toilet-example",
+        "projectId": "mtr-air-kiosk-05emf61",
+        "language": "en",
+        "referenceVersion": "synthetic-reference-v1",
+        "approvedBy": "",
+        "approvedAt": "2026-11-15T00:00:00.000Z",
+        "policy": {
+          "version": "pilot-policy-v1",
+          "passThreshold": 85,
+          "checkAdditionalClaims": true,
+          "blockingCategories": ["contradiction", "unsupported_claim"]
+        },
+        "requirements": [
+          {
+            "id": "R1",
+            "text": "Identify Level 1.",
+            "reference": {
+              "field": "expected_answer",
+              "quote": "Level 1"
+            },
+            "weight": 2,
+            "critical": false,
+            "applicable": true,
+            "applicabilityReason": "Explicitly requested by the question.",
+            "partial": null,
+            "check": {
+              "type": "semantic"
+            }
+          },
+          {
+            "id": "R2",
+            "text": "Identify the location beside Lift A.",
+            "reference": {
+              "field": "expected_answer",
+              "quote": "beside Lift A"
+            },
+            "weight": 1,
+            "critical": false,
+            "applicable": true,
+            "applicabilityReason": "Explicitly requested by the question.",
+            "partial": null,
+            "check": {
+              "type": "semantic"
+            }
+          },
+          {
+            "id": "R3",
+            "text": "Give the step-free route using Lift A from the concourse.",
+            "reference": {
+              "field": "expected_answer",
+              "quote": "Use Lift A from the concourse."
+            },
+            "weight": 3,
+            "critical": true,
+            "applicable": true,
+            "applicabilityReason": "Explicitly requested by the question.",
+            "partial": null,
+            "check": {
+              "type": "semantic"
+            }
+          }
+        ]
+      }
+    }
+  ]
+}

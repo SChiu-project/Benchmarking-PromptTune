@@ -17,7 +17,8 @@ export function searchRequest(q: Question, c: SearchConfig) {
     doc_search_version: 2,
     stream: false,
     with_reference: true,
-    ...(c.promptOverrides ? { ...c.promptOverrides, use_cache: false } : {}),
+    ...(c.promptOverrides ?? {}),
+    ...(c.promptOverrides || c.promptProvenance ? { use_cache: false } : {}),
   };
 }
 const section = z

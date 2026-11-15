@@ -12,6 +12,9 @@ import {
   ExternalLink,
 } from "lucide-react";
 import type { RecordData, RunSummary } from "@/lib/schema";
+import { CriteriaEditor } from "./criteria-editor";
+import { EvaluationScore, RequirementEvidence } from "./requirement-evaluation";
+import type { Question } from "@/lib/schema";
 import { dimensionNames, weights } from "@/lib/schema";
 import {
   api,
@@ -51,13 +54,18 @@ export function RecordsScreen() {
     [folder, setFolder] = useState(""),
     [execution, setExecution] = useState(""),
     [evaluation, setEvaluation] = useState(""),
+    [decision, setDecision] = useState(""),
     [query, setQuery] = useState(""),
     [loading, setLoading] = useState(true),
     [error, setError] = useState(""),
     [detailId, setDetailId] = useState(""),
     [detail, setDetail] = useState<RecordData | null>(null),
     [detailError, setDetailError] = useState(""),
-    [retrying, setRetrying] = useState(false);
+    [retrying, setRetrying] = useState(false),
+    [regradeQuestions, setRegradeQuestions] = useState<
+      Question[] | undefined
+    >(),
+    [criteriaBlocked, setCriteriaBlocked] = useState(false);
   useEffect(() => {
     let live = true;
     const stop = startPolling(async (signal) => {
@@ -69,7 +77,7 @@ export function RecordsScreen() {
             pages: number;
             folders: string[];
           }>(
-            `/api/records?${new URLSearchParams({ run: runId, folder, execution, evaluation, q: query, page: String(page) })}`,
+            `/api/records?${new URLSearchParams({ run: runId, folder, execution, evaluation, decision, q: query, page: String(page) })}`,
             { signal },
           ),
           api<RunSummary[]>("/api/runs", { signal }),
@@ -98,7 +106,7 @@ export function RecordsScreen() {
       live = false;
       stop();
     };
-  }, [runId, folder, execution, evaluation, query, page]);
+  }, [runId, folder, execution, evaluation, decision, query, page]);
   useEffect(() => {
     if (!detailId) return;
     let live = true;
@@ -130,7 +138,11 @@ export function RecordsScreen() {
     setRetrying(true);
     setDetailError("");
     try {
-      await api(`/api/records/${detail.id}/evaluate`, { method: "POST" });
+      await api(`/api/records/${detail.id}/evaluate`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ criteria: regradeQuestions?.[0].criteria }),
+      });
       setDetail(await api<RecordData>(`/api/records/${detail.id}`));
     } catch (e) {
       setDetailError((e as Error).message);
@@ -141,6 +153,8 @@ export function RecordsScreen() {
   const filtered = records;
   const run = runs.find((r) => r.id === runId);
   function open(id: string) {
+    setRegradeQuestions(undefined);
+    setCriteriaBlocked(false);
     setDetail(null);
     setDetailError("");
     setDetailId(id);
@@ -180,6 +194,19 @@ export function RecordsScreen() {
             <span className="mono">Run {run.id.slice(0, 8)}</span>
             <Badge value={run.status} />
             <span>Project: {run.projectId}</span>
+            {run.promptSource && (
+              <span
+                title={`${run.promptSource.environment} · ${run.promptSource.fingerprint}`}
+              >
+                CMS: {run.promptSource.folder} ·{" "}
+                {run.promptSource.isBase
+                  ? "Base configuration"
+                  : `v${run.promptSource.version}`}
+                {run.promptSource.staleAcknowledged
+                  ? " · stale baseline acknowledged"
+                  : ""}
+              </span>
+            )}
             {run.promptSections.length > 0 && (
               <span>Prompt test: {run.promptSections.join(", ")}</span>
             )}
@@ -201,6 +228,14 @@ export function RecordsScreen() {
             <span>
               Evaluation {run.evaluated} graded · {run.evaluationFailed} failed
               · {run.skipped} skipped
+            </span>
+            <span>
+              {run.passed} pass · {run.failed} fail · {run.review} review ·{" "}
+              {run.criticalFailures} critical failures
+            </span>
+            <span>
+              Coverage {percent(run.evaluationCoverage)} · Pass rate{" "}
+              {percent(run.passRate)}
             </span>
           </div>
           <progress
@@ -295,6 +330,22 @@ export function RecordsScreen() {
             )}
           </select>
         </div>
+        <label>
+          Decision{" "}
+          <select
+            aria-label="Filter by decision"
+            value={decision}
+            onChange={(e) => {
+              setDecision(e.target.value);
+              setPage(1);
+            }}
+          >
+            <option value="">All decisions</option>
+            <option value="pass">Pass</option>
+            <option value="fail">Fail</option>
+            <option value="review">Review</option>
+          </select>
+        </label>
         <div className="record-count">
           {total} matching record{total === 1 ? "" : "s"}
           <span>Updates automatically</span>
@@ -387,9 +438,11 @@ export function RecordsScreen() {
                     </td>
                     <td>
                       <strong className="score">
-                        {r.evaluationStatus === "succeeded"
-                          ? percent(r.evaluation?.score)
-                          : "—"}
+                        {r.evaluationStatus === "succeeded" ? (
+                          <EvaluationScore evaluation={r.evaluation} />
+                        ) : (
+                          "—"
+                        )}
                       </strong>
                     </td>
                     <td className="score-explanation">
@@ -398,25 +451,28 @@ export function RecordsScreen() {
                           <p>{r.evaluation.assessment}</p>
                           <details onClick={(e) => e.stopPropagation()}>
                             <summary>Score breakdown</summary>
-                            <dl>
-                              {dimensionNames.map((dimension) => {
-                                const criterion =
-                                  r.evaluation!.dimensions[dimension];
-                                const weight =
-                                  r.evaluation!.applicableWeights[dimension];
-                                return (
-                                  <div key={dimension}>
-                                    <dt>
-                                      <span>{dimension}</span>
-                                      {criterion.score === null
-                                        ? " · Unassessable"
-                                        : ` · ${criterion.score}/100 · ${Math.round(weight * 10) / 10}% weight`}
-                                    </dt>
-                                    <dd>{criterion.explanation}</dd>
-                                  </div>
-                                );
-                              })}
-                            </dl>
+                            <RequirementEvidence evaluation={r.evaluation} />
+                            {!r.evaluation.requirements && (
+                              <dl>
+                                {dimensionNames.map((dimension) => {
+                                  const criterion =
+                                    r.evaluation!.dimensions[dimension];
+                                  const weight =
+                                    r.evaluation!.applicableWeights[dimension];
+                                  return (
+                                    <div key={dimension}>
+                                      <dt>
+                                        <span>{dimension}</span>
+                                        {criterion.score === null
+                                          ? " · Unassessable"
+                                          : ` · ${criterion.score}/100 · ${Math.round(weight * 10) / 10}% weight`}
+                                      </dt>
+                                      <dd>{criterion.explanation}</dd>
+                                    </div>
+                                  );
+                                })}
+                              </dl>
+                            )}
                             {r.evaluation.limitations.length > 0 && (
                               <p className="score-limitations">
                                 <strong>Limitations: </strong>
@@ -529,6 +585,9 @@ export function RecordsScreen() {
                       className="button secondary small"
                       disabled={
                         retrying ||
+                        criteriaBlocked ||
+                        (!regradeQuestions?.[0].criteria &&
+                          !detail.question.criteria) ||
                         detail.execution !== "succeeded" ||
                         ["pending", "running"].includes(detail.evaluationStatus)
                       }
@@ -538,6 +597,25 @@ export function RecordsScreen() {
                       {retrying ? "Queuing…" : "Retry evaluation"}
                     </button>
                   </div>
+                  <CriteriaEditor
+                    key={detail.id}
+                    questions={[detail.question]}
+                    projectId={
+                      runs.find((r) => r.id === detail.runId)?.projectId ?? ""
+                    }
+                    disabled={
+                      retrying ||
+                      ["pending", "running"].includes(detail.evaluationStatus)
+                    }
+                    onChange={(questions, blocked) => {
+                      setRegradeQuestions(questions);
+                      setCriteriaBlocked(blocked);
+                    }}
+                  />
+                  <p className="muted">
+                    Regrading creates a new campaign against this saved answer
+                    and keeps prior results.
+                  </p>
                   {detail.evaluationReason && (
                     <div
                       className={`alert ${detail.evaluationStatus === "failed" ? "error" : "info"}`}
@@ -548,33 +626,39 @@ export function RecordsScreen() {
                   {detail.evaluation && (
                     <>
                       <div className="evaluation-heading">
-                        <strong>{percent(detail.evaluation.score)}</strong>
+                        <strong>
+                          <EvaluationScore evaluation={detail.evaluation} />
+                        </strong>
                         <p>{detail.evaluation.assessment}</p>
                       </div>
-                      <div className="dimension-grid">
-                        {dimensionNames.map((k) => (
-                          <div key={k}>
-                            <span>
-                              {k}
-                              <small>
-                                Base weight {weights[k]}% · Applied{" "}
-                                {Math.round(
-                                  detail.evaluation!.applicableWeights[k] * 10,
-                                ) / 10}
-                                %
-                              </small>
-                            </span>
-                            <strong>
-                              {detail.evaluation!.dimensions[k].score === null
-                                ? "Unassessable"
-                                : `${detail.evaluation!.dimensions[k].score} / 100`}
-                            </strong>
-                            <p>
-                              {detail.evaluation!.dimensions[k].explanation}
-                            </p>
-                          </div>
-                        ))}
-                      </div>
+                      <RequirementEvidence evaluation={detail.evaluation} />
+                      {!detail.evaluation.requirements && (
+                        <div className="dimension-grid">
+                          {dimensionNames.map((k) => (
+                            <div key={k}>
+                              <span>
+                                {k}
+                                <small>
+                                  Base weight {weights[k]}% · Applied{" "}
+                                  {Math.round(
+                                    detail.evaluation!.applicableWeights[k] *
+                                      10,
+                                  ) / 10}
+                                  %
+                                </small>
+                              </span>
+                              <strong>
+                                {detail.evaluation!.dimensions[k].score === null
+                                  ? "Unassessable"
+                                  : `${detail.evaluation!.dimensions[k].score} / 100`}
+                              </strong>
+                              <p>
+                                {detail.evaluation!.dimensions[k].explanation}
+                              </p>
+                            </div>
+                          ))}
+                        </div>
+                      )}
                       {(
                         [
                           { key: "fulfilled", label: "Requirements fulfilled" },
@@ -633,11 +717,29 @@ export function RecordsScreen() {
                           {a.finishedAt && (
                             <small>Finished {date(a.finishedAt)}</small>
                           )}
+                          {a.campaign && (
+                            <details>
+                              <summary>Campaign {a.campaign.id}</summary>
+                              <pre>
+                                {JSON.stringify(
+                                  {
+                                    campaign: a.campaign,
+                                    evidenceHash: a.evidenceHash,
+                                    question: a.questionSnapshot,
+                                    providerModel: a.providerModel,
+                                  },
+                                  null,
+                                  2,
+                                )}
+                              </pre>
+                            </details>
+                          )}
                           {a.error && <p className="error-text">{a.error}</p>}
                           {a.result && (
                             <details>
                               <summary>
-                                Saved attempt result · {percent(a.result.score)}
+                                Saved attempt result ·{" "}
+                                <EvaluationScore evaluation={a.result} />
                               </summary>
                               <pre>{JSON.stringify(a.result, null, 2)}</pre>
                             </details>

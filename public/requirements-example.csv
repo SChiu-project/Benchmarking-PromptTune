@@ -1,0 +1,2 @@
+query,folder,expected_answer,evaluation_comments
+Synthetic example: where is the accessible toilet and how do I get there without stairs?,Codex_Benchmark_tool,"Level 1, beside Lift A. Use Lift A from the concourse.",Invented locations for demonstrating evaluation. Do not use as passenger guidance.

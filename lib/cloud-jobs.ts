@@ -1,3 +1,5 @@
+import { evidenceHash } from "./evaluation-snapshot";
+import { REQUIREMENT_RUBRIC, needsJudge } from "./evaluation-contract";
 import { randomUUID } from "node:crypto";
 import { transaction, finishRuns } from "./store";
 import { search, SearchFailure } from "./doc-search";
@@ -16,7 +18,7 @@ import type {
 } from "./schema";
 type Services = {
   search: (q: Question, c: SearchConfig) => Promise<SearchResult>;
-  evaluate: (q: Question, a: string) => Promise<Evaluation>;
+  evaluate: typeof evaluate;
   config: typeof evaluatorConfig;
 };
 const services: Services = { search, evaluate, config: evaluatorConfig };
@@ -134,12 +136,29 @@ export async function processCloudEvaluation(
     }
     if (r.execution !== "succeeded" || !r.result)
       reason = "Doc Search did not produce a confirmed answer.";
+    else if ((r.queuedCampaign ?? run!.campaign) && !r.question.criteria)
+      reason =
+        "Approved requirements are required. Import criteria before regrading.";
+    else if (
+      (r.queuedCampaign ?? run!.campaign) &&
+      !(r.queuedCampaign ?? run!.campaign)!.evaluator &&
+      needsJudge(r.question)
+    )
+      reason =
+        "Evaluator was not configured when this campaign was created. Configure it and regrade.";
     else if (!evaluationBasis(r.question))
       reason = "No expected answer or evaluation comments supplied.";
-    else if (!config)
+    else if (!config && needsJudge(r.question))
       reason =
         reason ||
         "Evaluator not configured. Set EVALUATOR_ENDPOINT, EVALUATOR_MODEL, and EVALUATOR_API_KEY.";
+    if (
+      !needsJudge(r.question) &&
+      r.question.criteria &&
+      r.execution === "succeeded" &&
+      r.result
+    )
+      reason = undefined;
     if (reason) {
       r.evaluationStatus = "skipped";
       r.evaluationReason = reason;
@@ -155,9 +174,22 @@ export async function processCloudEvaluation(
     const attemptId = randomUUID();
     r.attempts.push({
       id: attemptId,
-      model: config!.model,
-      endpoint: config!.endpoint,
-      rubricVersion: RUBRIC_VERSION,
+      model:
+        (r.queuedCampaign ?? run!.campaign)?.evaluator?.model ??
+        config?.model ??
+        "deterministic",
+      endpoint:
+        (r.queuedCampaign ?? run!.campaign)?.evaluator?.endpoint ??
+        config?.endpoint ??
+        "local:deterministic",
+      rubricVersion: r.question.criteria ? REQUIREMENT_RUBRIC : RUBRIC_VERSION,
+      campaign: r.queuedCampaign ?? run!.campaign,
+      questionSnapshot: r.question,
+      evidenceHash: evidenceHash(
+        r.question,
+        r.result!.answer,
+        r.result!.sources,
+      ),
       startedAt: new Date().toISOString(),
       status: "running",
     });
@@ -165,6 +197,8 @@ export async function processCloudEvaluation(
       done: false,
       question: r.question,
       answer: r.result!.answer,
+      sources: r.result!.sources,
+      snapshot: (r.queuedCampaign ?? run!.campaign)?.evaluator,
       attemptId,
     } as const;
   });
@@ -172,7 +206,10 @@ export async function processCloudEvaluation(
     return job.done;
   let result: Evaluation | undefined, error: unknown;
   try {
-    result = await deps.evaluate(job.question, job.answer);
+    result = await deps.evaluate(job.question, job.answer, {
+      sources: job.sources,
+      snapshot: job.snapshot,
+    });
   } catch (e) {
     error = e;
   }
@@ -191,10 +228,12 @@ export async function processCloudEvaluation(
     a.finishedAt = new Date().toISOString();
     if (result) {
       a.result = result;
-      a.status = result.score === null ? "skipped" : "succeeded";
+      a.providerModel = result.providerModel;
+      a.status =
+        result.score === null && !result.requirements ? "skipped" : "succeeded";
       r.evaluation = result;
       r.evaluationStatus = a.status;
-      if (result.score === null)
+      if (result.score === null && !result.requirements)
         r.evaluationReason =
           "No meaningful assessable grading basis; see limitations.";
     } else {

@@ -16,6 +16,7 @@
     "test:workflow": "node scripts/workflow-smoke.mjs && node scripts/workflow-smoke.mjs --postgres",
     "deploy:check": "node scripts/deployment-check.mjs",
     "data:import": "tsx scripts/import-local-data.ts",
+    "cms:check": "tsx scripts/smoke-cms.ts",
     "package:github": "python3 scripts/package-github.py"
   },
   "dependencies": {

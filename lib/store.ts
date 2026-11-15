@@ -9,13 +9,47 @@ import {
   type State,
   type Run,
   type CreateRun,
+  type Question,
 } from "./schema";
 import { databaseMode, workflowMode, isVercel } from "./runtime";
 import { databaseTransaction, readDatabaseSnapshot } from "./postgres-store";
 import { searchConfig } from "./doc-search";
+import {
+  assertSnapshotScope,
+  canonicalJson,
+  checkPromptSnapshot,
+  getPromptSnapshot,
+} from "./cms-prompts";
+import { changedPrompts, type PromptSnapshot } from "./prompt-schema";
+import { CmsError } from "./cms-client";
+import { evaluatorConfig } from "./evaluator";
+import { createCampaign } from "./evaluation-snapshot";
+import {
+  validateCriteriaReferences,
+  attachCriteria,
+  criteriaSchema,
+  needsJudge,
+  type Criteria,
+} from "./evaluation-contract";
 export const dataDir = () =>
   process.env.DATA_DIR || path.join(process.cwd(), "data");
 export class ConflictError extends Error {}
+function validateApprovedReferences(q: Question) {
+  try {
+    validateCriteriaReferences(q);
+  } catch (e) {
+    throw new ConflictError((e as Error).message);
+  }
+}
+function campaignFor(questions: Question[]) {
+  let config: ReturnType<typeof evaluatorConfig> = null;
+  try {
+    if (questions.some(needsJudge)) config = evaluatorConfig();
+  } catch {
+    /* Search remains usable; grading reports missing/invalid configuration. */
+  }
+  return createCampaign(questions, config);
+}
 export async function transaction<T>(
   fn: (state: State) => T | Promise<T>,
 ): Promise<T> {
@@ -115,19 +149,90 @@ export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
     throw new ConflictError(
       "Hosted Doc Search timeout must not exceed 180000 ms.",
     );
+  const savedState = body.promptSelection ? await readState() : undefined;
+  const savedSubmission = savedState?.runs.find(
+    (r) => r.idempotencyKey === body.idempotencyKey,
+  );
+  const identitySnapshot =
+    savedSubmission?.config.promptProvenance?.snapshot ??
+    savedState?.promptSnapshots?.find(
+      (s) => s.id === body.promptSelection?.snapshotId,
+    );
+  const hashInput = {
+    questions: body.questions,
+    concurrency: body.concurrency,
+    kind,
+    ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
+    ...(body.promptOverrides === undefined
+      ? {}
+      : { promptOverrides: body.promptOverrides }),
+    ...(body.promptSelection
+      ? {
+          promptSelection: body.promptSelection,
+          baselineIdentity: identitySnapshot
+            ? {
+                projectId: identitySnapshot.projectId,
+                documentFolder: identitySnapshot.documentFolder,
+                promptFolder: identitySnapshot.promptFolder,
+                environment: identitySnapshot.environment,
+                searchEndpoint: identitySnapshot.searchEndpoint,
+                fingerprint: identitySnapshot.fingerprint,
+                version: identitySnapshot.version,
+                versionId: identitySnapshot.versionId,
+                isBase: identitySnapshot.isBase,
+              }
+            : null,
+          useCache: false,
+        }
+      : {}),
+  };
   const requestHash = createHash("sha256")
     .update(
-      JSON.stringify({
-        questions: body.questions,
-        concurrency: body.concurrency,
-        kind,
-        ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
-        ...(body.promptOverrides === undefined
-          ? {}
-          : { promptOverrides: body.promptOverrides }),
-      }),
+      body.promptSelection
+        ? canonicalJson(hashInput)
+        : JSON.stringify(hashInput),
     )
     .digest("hex");
+  let snapshot: PromptSnapshot | undefined;
+  if (body.promptSelection) {
+    // Completed submissions remain retryable after auth/snapshot expiry, without more upstream reads.
+    const prior = savedSubmission;
+    if (prior) {
+      if (prior.requestHash !== requestHash)
+        throw new ConflictError(
+          "This submission key was already used for a different batch.",
+        );
+      return prior.id;
+    }
+    snapshot = await getPromptSnapshot(body.promptSelection.snapshotId);
+    assertSnapshotScope(snapshot, config.projectId, [
+      ...new Set(body.questions.map((q) => q.folder)),
+    ]);
+    for (const key of Object.keys(body.promptOverrides ?? {})) {
+      if (!snapshot.baseline[key as keyof typeof snapshot.baseline])
+        throw new ConflictError(
+          "Cannot override a section unavailable in the loaded CMS baseline.",
+        );
+    }
+    const overrides = changedPrompts(snapshot.baseline, {
+      ...snapshot.baseline,
+      ...body.promptOverrides,
+    });
+    if (overrides) config.promptOverrides = overrides;
+    else delete config.promptOverrides;
+    const check = await checkPromptSnapshot(snapshot);
+    if (check.changed && !body.promptSelection.allowStale)
+      throw new CmsError(
+        "CMS changed since this prompt was loaded. Check the source, reload it, or acknowledge using the saved baseline.",
+        409,
+        "CMS_BASELINE_CHANGED",
+      );
+    config.promptProvenance = {
+      snapshot,
+      checkedAt: check.checkedAt,
+      staleAcknowledged: check.changed,
+    };
+  }
   return transaction((s) => {
     const prior = s.runs.find((r) => r.idempotencyKey === body.idempotencyKey);
     if (prior) {
@@ -137,10 +242,26 @@ export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
         );
       return prior.id;
     }
+    if (snapshot)
+      assertSnapshotScope(snapshot, config.projectId, [
+        ...new Set(body.questions.map((q) => q.folder)),
+      ]);
     if (s.runs.some((r) => r.status === "active"))
       throw new ConflictError(
         "A run or connectivity test is active. Wait for both queues to finish.",
       );
+    for (const q of body.questions) {
+      validateApprovedReferences(q);
+      if (q.criteria && q.criteria.projectId !== config.projectId)
+        throw new ConflictError(
+          "Criteria project must match the selected project.",
+        );
+    }
+    const caseIds = body.questions.flatMap((q) =>
+      q.criteria ? [q.criteria.caseId] : [],
+    );
+    if (new Set(caseIds).size !== caseIds.length)
+      throw new ConflictError("Case IDs must be unique.");
     // Defense in depth: clients cannot bypass upload normalization or duplicate checks.
     const keys = body.questions.map((q) => JSON.stringify([q.query, q.folder]));
     if (new Set(keys).size !== keys.length)
@@ -158,6 +279,7 @@ export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
       status: "active",
       concurrency: kind === "test" ? 1 : body.concurrency,
       config,
+      campaign: campaignFor(body.questions),
       records: body.questions.map((question) => ({
         id: randomUUID(),
         runId: id,
@@ -173,7 +295,7 @@ export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
     return id;
   });
 }
-export async function retryEvaluation(id: string) {
+export async function retryEvaluation(id: string, criteria?: Criteria) {
   return transaction((s) => {
     const run = s.runs.find((r) => r.records.some((x) => x.id === id)),
       record = run?.records.find((r) => r.id === id);
@@ -190,6 +312,29 @@ export async function retryEvaluation(id: string) {
       throw new ConflictError("Evaluation is already queued.");
     if (s.runs.some((r) => r.status === "active" && r.id !== run.id))
       throw new ConflictError("Another run is active. Wait for it to finish.");
+    if (criteria) {
+      const approved = criteriaSchema.parse(criteria);
+      if (approved.projectId !== run.config.projectId)
+        throw new ConflictError("Criteria project does not match this run.");
+      if (
+        run.records.some(
+          (r) => r.id !== id && r.question.criteria?.caseId === approved.caseId,
+        )
+      )
+        throw new ConflictError("Case ID is already used in this run.");
+      const question = { ...record.question, criteria: approved };
+      validateApprovedReferences(question);
+      record.question = question;
+    }
+    if (!record.question.criteria)
+      throw new ConflictError(
+        "Import approved requirements before regrading this answer.",
+      );
+    // A new campaign preserves the old attempt snapshots and never regenerates the answer.
+    const campaign = campaignFor([record.question]);
+    if (!campaign.evaluator && needsJudge(record.question))
+      throw new ConflictError("Configure the evaluator before regrading.");
+    record.queuedCampaign = campaign;
     run.generation = (run.generation ?? 0) + 1;
     delete run.workflowRunId;
     delete run.dispatchError;
@@ -199,5 +344,64 @@ export async function retryEvaluation(id: string) {
     run.status = "active";
     delete run.finishedAt;
     return record.id;
+  });
+}
+
+/** Regrade saved answers as one frozen campaign, without issuing any search calls. */
+export async function regradeRun(id: string, sidecar?: unknown) {
+  return transaction(async (s) => {
+    const run = s.runs.find((r) => r.id === id);
+    if (!run || run.kind !== "batch")
+      throw new ConflictError("Batch run not found.");
+    if (s.runs.some((r) => r.status === "active"))
+      throw new ConflictError(
+        "Wait for the active run to finish before regrading.",
+      );
+    let questions: Question[];
+    try {
+      questions =
+        sidecar === undefined
+          ? run.records.map((r) => r.question)
+          : attachCriteria(
+              run.records.map((r) => r.question),
+              sidecar,
+              run.config.projectId,
+            );
+    } catch (e) {
+      throw new ConflictError((e as Error).message);
+    }
+    if (questions.some((q) => !q.criteria))
+      throw new ConflictError(
+        "Every case needs approved requirements. Supply a complete criteria sidecar.",
+      );
+    for (const q of questions) {
+      validateApprovedReferences(q);
+      if (q.criteria!.projectId !== run.config.projectId)
+        throw new ConflictError("Criteria project mismatch.");
+    }
+    if (
+      new Set(questions.map((q) => q.criteria!.caseId)).size !==
+      questions.length
+    )
+      throw new ConflictError("Case IDs must be unique.");
+    if (!run.records.some((r) => r.execution === "succeeded" && r.result))
+      throw new ConflictError("No saved successful answers to regrade.");
+    const campaign = campaignFor(questions);
+    if (!campaign.evaluator && questions.some(needsJudge))
+      throw new ConflictError("Configure the evaluator before regrading.");
+    run.records.forEach((record, i) => {
+      record.question = questions[i];
+      if (record.execution !== "succeeded" || !record.result) return;
+      record.queuedCampaign = campaign;
+      record.evaluationStatus = "pending";
+      delete record.evaluation;
+      delete record.evaluationReason;
+    });
+    run.generation = (run.generation ?? 0) + 1;
+    delete run.workflowRunId;
+    delete run.dispatchError;
+    delete run.finishedAt;
+    run.status = "active";
+    return { id: run.id, campaignId: campaign.id };
   });
 }

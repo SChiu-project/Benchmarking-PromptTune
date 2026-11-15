@@ -16,6 +16,8 @@ export function listRecords(state: State, params: URLSearchParams) {
       (!params.get("execution") || r.execution === params.get("execution")) &&
       (!params.get("evaluation") ||
         r.evaluationStatus === params.get("evaluation")) &&
+      (!params.get("decision") ||
+        r.evaluation?.requirements?.decision === params.get("decision")) &&
       r.question.query
         .toLowerCase()
         .includes((params.get("q") || "").toLowerCase()),

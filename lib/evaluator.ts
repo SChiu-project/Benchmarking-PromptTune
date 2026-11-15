@@ -1,4 +1,8 @@
 import { isVercel } from "./runtime";
+import { calculateRequirementEvaluation } from "./requirement-scoring";
+import { REQUIREMENT_PROMPT } from "./evaluation-snapshot";
+import { needsJudge, type EvaluatorSnapshot } from "./evaluation-contract";
+import type { SearchResult } from "./schema";
 import { z } from "zod";
 import {
   dimensionNames,
@@ -27,7 +31,9 @@ export function evaluatorConfig() {
     : null;
 }
 export function evaluationBasis(q: Question) {
-  return Boolean(q.expected_answer.trim() || q.evaluation_comments.trim());
+  return Boolean(
+    q.criteria || q.expected_answer.trim() || q.evaluation_comments.trim(),
+  );
 }
 export function calculateEvaluation(raw: unknown): Evaluation {
   const parsed = evaluatorOutputSchema.parse(raw);
@@ -74,22 +80,47 @@ Return ONLY JSON with this exact shape:
 export async function evaluate(
   q: Question,
   answer: string,
+  context?: {
+    sources: SearchResult["sources"];
+    snapshot?: EvaluatorSnapshot | null;
+  },
 ): Promise<Evaluation> {
+  if (!needsJudge(q))
+    return calculateRequirementEvaluation(q, answer, context?.sources ?? null, {
+      judgments: [],
+      claims: [],
+      grounding: {
+        status: "unknown",
+        evidence: [],
+        explanation:
+          "Retrieval grounding was not judged in this deterministic-only evaluation.",
+      },
+    });
   const c = evaluatorConfig();
   if (!c) throw new Error("Evaluator not configured.");
-  const response = await fetch(c.endpoint, {
+  const snapshot = context?.snapshot;
+  if (snapshot && snapshot.endpoint !== c.endpoint)
+    throw new Error(
+      "Evaluator endpoint changed since campaign creation. Start a new evaluation campaign.",
+    );
+  const response = await fetch(snapshot?.endpoint ?? c.endpoint, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
       Authorization: `Bearer ${c.key}`,
     },
-    signal: AbortSignal.timeout(c.timeoutMs),
+    signal: AbortSignal.timeout(snapshot?.timeoutMs ?? c.timeoutMs),
     body: JSON.stringify({
-      model: c.model,
+      model: snapshot?.model ?? c.model,
       temperature: 0,
       response_format: { type: "json_object" },
       messages: [
-        { role: "system", content: system },
+        {
+          role: "system",
+          content: q.criteria
+            ? (snapshot?.prompt ?? REQUIREMENT_PROMPT)
+            : system,
+        },
         {
           role: "user",
           content: JSON.stringify({
@@ -97,6 +128,16 @@ export async function evaluate(
             expected_answer: q.expected_answer,
             evaluation_comments: q.evaluation_comments,
             answer,
+            ...(q.criteria
+              ? {
+                  criteria: q.criteria,
+                  sources:
+                    context?.sources?.map((s) => ({
+                      title: s.title,
+                      content: s.content,
+                    })) ?? null,
+                }
+              : {}),
           }),
         },
       ],
@@ -108,10 +149,26 @@ export async function evaluate(
     );
   const envelope = z
     .object({
+      model: z.string().optional(),
+      usage: z
+        .object({
+          prompt_tokens: z.number().int().nonnegative().optional(),
+          completion_tokens: z.number().int().nonnegative().optional(),
+          total_tokens: z.number().int().nonnegative().optional(),
+        })
+        .optional(),
       choices: z
         .array(z.object({ message: z.object({ content: z.string() }) }))
         .min(1),
     })
     .parse(await response.json());
-  return calculateEvaluation(JSON.parse(envelope.choices[0].message.content));
+  const raw = JSON.parse(envelope.choices[0].message.content);
+  const result = q.criteria
+    ? calculateRequirementEvaluation(q, answer, context?.sources ?? null, raw)
+    : calculateEvaluation(raw);
+  return {
+    ...result,
+    ...(envelope.model ? { providerModel: envelope.model } : {}),
+    ...(envelope.usage ? { usage: envelope.usage } : {}),
+  };
 }

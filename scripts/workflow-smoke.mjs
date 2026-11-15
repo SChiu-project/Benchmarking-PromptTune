@@ -26,21 +26,59 @@ if (usePostgres) {
 }
 
 const grade = {
-  dimensions: Object.fromEntries(
-    ["correctness", "coverage", "relevance", "compliance"].map((k) => [
-      k,
-      { score: 80, explanation: "Deterministic mock criterion evidence." },
-    ]),
-  ),
-  assessment: "Deterministic test assessment.",
-  fulfilled: ["Reference"],
-  missing: [],
-  contradictions: [],
-  unsupported_claims: [],
-  discrepancies: [],
-  improvements: [],
-  limitations: [],
+  judgments: [],
+  claims: [],
+  grounding: {
+    status: "unknown",
+    evidence: [],
+    explanation: "Mock retrieval returned no passages.",
+  },
 };
+function criteria(caseId) {
+  return {
+    version: "smoke-v1",
+    caseId,
+    projectId: "mock-project",
+    language: "en",
+    referenceVersion: "smoke-reference-v1",
+    approvedBy: "Synthetic test fixture",
+    approvedAt: "2026-11-15T00:00:00.000Z",
+    policy: {
+      version: "smoke-policy-v1",
+      passThreshold: 85,
+      checkAdditionalClaims: true,
+      blockingCategories: ["contradiction", "unsupported_claim"],
+    },
+    requirements: [
+      {
+        id: "R1",
+        text: "Include Mock answer.",
+        reference: { field: "expected_answer", quote: "Mock answer" },
+        weight: 4,
+        critical: false,
+        applicable: true,
+        applicabilityReason: "Synthetic contract",
+        partial: null,
+        check: { type: "contains", value: "Mock answer", caseSensitive: true },
+      },
+      {
+        id: "R2",
+        text: "Include REQUIRED_DETAIL.",
+        reference: { field: "expected_answer", quote: "REQUIRED_DETAIL" },
+        weight: 1,
+        critical: false,
+        applicable: true,
+        applicabilityReason: "Synthetic contract",
+        partial: null,
+        check: {
+          type: "contains",
+          value: "REQUIRED_DETAIL",
+          caseSensitive: true,
+        },
+      },
+    ],
+  };
+}
 let searches = 0,
   grades = 0;
 const searchRequests = [];
@@ -145,14 +183,16 @@ try {
     questions: [
       {
         query: "Synthetic smoke question 1",
+        criteria: criteria("smoke-1"),
         folder: "mock-folder",
-        expected_answer: "Mock reference",
+        expected_answer: "Mock answer. REQUIRED_DETAIL.",
         evaluation_comments: "",
       },
       {
         query: "Synthetic smoke question 2",
+        criteria: criteria("smoke-2"),
         folder: "mock-folder",
-        expected_answer: "Mock reference",
+        expected_answer: "Mock answer. REQUIRED_DETAIL.",
         evaluation_comments: "",
       },
     ],
@@ -193,10 +233,9 @@ try {
   }
   const page = await (await protectedFetch(base + "/api/records")).json();
   assert.equal(page.total, 2);
-  assert.equal(
-    page.records[0].evaluation.assessment,
-    "Deterministic test assessment.",
-  );
+  assert.equal(page.records[0].evaluation.requirements.decision, "fail");
+  assert.equal(page.records[0].evaluation.requirements.earnedWeight, 4);
+  assert.equal(page.records[0].evaluation.requirements.applicableWeight, 5);
   const testResponse = await protectedFetch(base + "/api/test", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -222,6 +261,27 @@ try {
     searchRequests[2].custom_instruction_dto,
     payload.promptOverrides.custom_instruction_dto,
   );
+  const regrade = await protectedFetch(base + `/api/runs/${id}/evaluate`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: "{}",
+  });
+  assert.equal(regrade.status, 202);
+  const { campaignId } = await regrade.json();
+  for (let i = 0; i < 100; i++) {
+    run = await (await protectedFetch(base + `/api/runs/${id}`)).json();
+    if (run.summary.status !== "active") break;
+    await wait(400);
+  }
+  assert.equal(run.summary.status, "completed");
+  assert.equal(searches, 3, "Regrading must not regenerate answers");
+  assert.equal(grades, 4);
+  const detail = await (
+    await protectedFetch(base + `/api/records/${page.records[0].id}`)
+  ).json();
+  assert.equal(detail.attempts.length, 2);
+  assert.equal(detail.attempts[1].campaign.id, campaignId);
+  assert.notEqual(detail.attempts[0].campaign.id, campaignId);
   if (usePostgres) {
     const stored = await database.query(
       "SELECT jsonb_typeof(payload) AS kind FROM doc_benchmark_state",
@@ -229,7 +289,7 @@ try {
     assert.equal(stored.rows[0].kind, "object");
   }
   console.log(
-    `Workflow HTTP smoke (${usePostgres ? "PostgreSQL production driver" : "local JSON"}) passed: Basic auth, durable dispatch, duplicate submission, 2 searches, 2 evaluations, persistence, and record pagination. All upstream services were local mocks.`,
+    `Workflow HTTP smoke (${usePostgres ? "PostgreSQL production driver" : "local JSON"}) passed: Basic auth, durable dispatch, duplicate submission, 2 benchmark searches, 4 evaluations, saved-answer campaign regrading, persistence, and record pagination. All upstream services were local mocks.`,
   );
 } catch (error) {
   console.error(logs.slice(-14000));

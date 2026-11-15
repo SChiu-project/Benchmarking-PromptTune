@@ -18,7 +18,14 @@ import {
   Info,
 } from "lucide-react";
 import type { CsvReview } from "@/lib/csv";
-import type { RunSummary, RecordData, PromptOverrides } from "@/lib/schema";
+import type {
+  RunSummary,
+  RecordData,
+  PromptOverrides,
+  Question,
+} from "@/lib/schema";
+import { CriteriaEditor } from "./criteria-editor";
+import type { PromptSelection } from "@/lib/prompt-schema";
 import { PromptEditor } from "./prompt-editor";
 import {
   api,
@@ -51,7 +58,14 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     [promptOverrides, setPromptOverrides] = useState<
       PromptOverrides | undefined
     >(),
+    [promptSelection, setPromptSelection] = useState<
+      PromptSelection | undefined
+    >(),
     [promptBlocked, setPromptBlocked] = useState(false),
+    [criteriaQuestions, setCriteriaQuestions] = useState<
+      Question[] | undefined
+    >(),
+    [criteriaBlocked, setCriteriaBlocked] = useState(false),
     [promptEditorKey, setPromptEditorKey] = useState(0),
     [testId, setTestId] = useState(""),
     [testing, setTesting] = useState(false),
@@ -144,7 +158,10 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
       setTest(null);
       setTestError("");
       setConcurrency(3);
+      setCriteriaQuestions(undefined);
+      setCriteriaBlocked(false);
       setPromptOverrides(undefined);
+      setPromptSelection(undefined);
       setPromptBlocked(false);
       setPromptEditorKey((value) => value + 1);
     } catch (e) {
@@ -167,6 +184,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
           question: review.questions[0],
           projectId: projectId.trim(),
           promptOverrides,
+          promptSelection,
           idempotencyKey: crypto.randomUUID(),
         }),
       });
@@ -186,10 +204,11 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          questions: review.questions,
+          questions: criteriaQuestions ?? review.questions,
           concurrency,
           projectId: projectId.trim(),
           promptOverrides,
+          promptSelection,
           idempotencyKey: submissionKey.current,
         }),
       });
@@ -203,6 +222,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
   const blocked =
     !review?.questions.length ||
     promptBlocked ||
+    criteriaBlocked ||
     !projectId.trim() ||
     projectId.trim().length > 500 ||
     Boolean(review.errors.length) ||
@@ -543,7 +563,10 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                 onChange={(event) => {
                   projectInitialized.current = true;
                   setProjectId(event.target.value);
+                  setCriteriaQuestions(undefined);
+                  setCriteriaBlocked(false);
                   setPromptOverrides(undefined);
+                  setPromptSelection(undefined);
                   setPromptBlocked(false);
                   setPromptEditorKey((value) => value + 1);
                   submissionKey.current = crypto.randomUUID();
@@ -567,13 +590,36 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                   : null
               }
               disabled={testing || starting}
-              onChange={(overrides, invalid) => {
+              onChange={(overrides, invalid, selection) => {
                 setPromptOverrides(overrides);
+                setPromptSelection(selection);
                 setPromptBlocked(invalid);
                 submissionKey.current = crypto.randomUUID();
                 setTest(null);
                 setTestId("");
                 setTestError("");
+              }}
+            />
+            <p className="muted">
+              Try the synthetic{" "}
+              <a href="/requirements-example.csv" download>
+                requirements CSV
+              </a>{" "}
+              and{" "}
+              <a href="/requirements-example.json" download>
+                draft criteria JSON
+              </a>
+              . Update the criteria project ID to match this run.
+            </p>
+            <CriteriaEditor
+              key={`criteria-${promptEditorKey}`}
+              questions={review.questions}
+              projectId={projectId.trim()}
+              disabled={testing || starting}
+              onChange={(questions, invalid) => {
+                setCriteriaQuestions(questions);
+                setCriteriaBlocked(invalid);
+                submissionKey.current = crypto.randomUUID();
               }}
             />
             <div className="folder-tags">

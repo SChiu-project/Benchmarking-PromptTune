@@ -1,8 +1,14 @@
 import { StoredStateError } from "./postgres-store";
 import { z } from "zod";
 import { isVercel } from "./runtime";
+import { CmsError } from "./cms-client";
 import { ConflictError } from "./store";
 export function fail(error: unknown) {
+  if (error instanceof CmsError)
+    return Response.json(
+      { error: error.message, code: error.code },
+      { status: error.status, headers: { "Cache-Control": "no-store" } },
+    );
   const databaseCode =
     error && typeof error === "object" && "code" in error
       ? String(error.code)

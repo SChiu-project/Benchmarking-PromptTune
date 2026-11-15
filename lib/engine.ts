@@ -1,3 +1,5 @@
+import { evidenceHash } from "./evaluation-snapshot";
+import { REQUIREMENT_RUBRIC, needsJudge } from "./evaluation-contract";
 import { randomUUID } from "node:crypto";
 import { transaction, finishRuns } from "./store";
 import { search, SearchFailure } from "./doc-search";
@@ -15,7 +17,7 @@ import type {
 } from "./schema";
 type Dependencies = {
   search: (q: Question, c: SearchConfig) => Promise<SearchResult>;
-  evaluate: (q: Question, answer: string) => Promise<Evaluation>;
+  evaluate: typeof evaluate;
   config: typeof evaluatorConfig;
 };
 export class Engine {
@@ -48,12 +50,23 @@ export class Engine {
         } catch {
           reason = "Invalid evaluator configuration. Check server environment.";
         }
-        if (!evaluationBasis(r.question))
+        if ((r.queuedCampaign ?? run!.campaign) && !r.question.criteria)
+          reason =
+            "Approved requirements are required. Import criteria before regrading.";
+        else if (
+          (r.queuedCampaign ?? run!.campaign) &&
+          !(r.queuedCampaign ?? run!.campaign)!.evaluator &&
+          needsJudge(r.question)
+        )
+          reason =
+            "Evaluator was not configured when this campaign was created. Configure it and regrade.";
+        else if (!evaluationBasis(r.question))
           reason = "No expected answer or evaluation comments supplied.";
-        else if (!config)
+        else if (!config && needsJudge(r.question))
           reason =
             reason ||
             "Evaluator not configured. Set EVALUATOR_ENDPOINT, EVALUATOR_MODEL, and EVALUATOR_API_KEY.";
+        if (!needsJudge(r.question) && r.question.criteria) reason = undefined;
         if (reason) {
           r.evaluationStatus = "skipped";
           r.evaluationReason = reason;
@@ -65,9 +78,24 @@ export class Engine {
         this.evals.add(r.id);
         r.attempts.push({
           id: randomUUID(),
-          model: config!.model,
-          endpoint: config!.endpoint,
-          rubricVersion: RUBRIC_VERSION,
+          model:
+            (r.queuedCampaign ?? run!.campaign)?.evaluator?.model ??
+            config?.model ??
+            "deterministic",
+          endpoint:
+            (r.queuedCampaign ?? run!.campaign)?.evaluator?.endpoint ??
+            config?.endpoint ??
+            "local:deterministic",
+          rubricVersion: r.question.criteria
+            ? REQUIREMENT_RUBRIC
+            : RUBRIC_VERSION,
+          campaign: r.queuedCampaign ?? run!.campaign,
+          questionSnapshot: r.question,
+          evidenceHash: evidenceHash(
+            r.question,
+            r.result!.answer,
+            r.result!.sources,
+          ),
           startedAt: new Date().toISOString(),
           status: "running",
         });
@@ -86,7 +114,12 @@ export class Engine {
         process.kill(process.pid, "SIGTERM");
       });
     for (const r of jobs.evals)
-      void this.grade(r.id, r.question, r.result!.answer).catch((e) => {
+      void this.grade(
+        r.id,
+        r.question,
+        r.result!,
+        r.attempts.at(-1)?.campaign?.evaluator,
+      ).catch((e) => {
         console.error("Evaluation persistence failed; worker stopping.", e);
         process.exitCode = 1;
         process.kill(process.pid, "SIGTERM");
@@ -126,11 +159,19 @@ export class Engine {
       this.docs.delete(id);
     }
   }
-  private async grade(id: string, q: Question, answer: string) {
+  private async grade(
+    id: string,
+    q: Question,
+    saved: SearchResult,
+    snapshot?: import("./evaluation-contract").EvaluatorSnapshot | null,
+  ) {
     try {
       let result: Evaluation | undefined, error: unknown;
       try {
-        result = await this.deps.evaluate(q, answer);
+        result = await this.deps.evaluate(q, saved.answer, {
+          sources: saved.sources,
+          snapshot,
+        });
       } catch (e) {
         error = e;
       }
@@ -140,10 +181,17 @@ export class Engine {
         a.finishedAt = new Date().toISOString();
         if (result) {
           a.result = result;
-          a.status = result.score === null ? "skipped" : "succeeded";
+          a.providerModel = result.providerModel;
+          a.status =
+            result.score === null && !result.requirements
+              ? "skipped"
+              : "succeeded";
           r.evaluation = result;
-          r.evaluationStatus = result.score === null ? "skipped" : "succeeded";
-          if (result.score === null)
+          r.evaluationStatus =
+            result.score === null && !result.requirements
+              ? "skipped"
+              : "succeeded";
+          if (result.score === null && !result.requirements)
             r.evaluationReason =
               "No meaningful assessable grading basis; see limitations.";
         } else {

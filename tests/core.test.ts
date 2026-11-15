@@ -23,6 +23,7 @@ import {
   retryEvaluation,
 } from "../lib/store";
 import { Engine } from "../lib/engine";
+import { criteriaFor } from "./helpers/requirements";
 import {
   summarize,
   stateSchema,
@@ -439,6 +440,10 @@ describe("durable queue", () => {
       concurrency: 3,
       questions: Array.from({ length: 12 }, (_, i) => question(String(i))),
     });
+    // Preserve the legacy persisted-run path; v2 parity is tested separately.
+    await transaction((s) => {
+      delete s.runs[0].campaign;
+    });
     for (let i = 0; i < 250; i++) {
       await engine.tick();
       if ((await readState()).runs[0].status !== "active") break;
@@ -477,8 +482,11 @@ describe("durable queue", () => {
     }
     let record = (await readState()).runs[0].records[0];
     expect(record.evaluationStatus).toBe("skipped");
-    expect(record.evaluationReason).toContain("not configured");
-    await retryEvaluation(record.id);
+    expect(record.evaluationReason).toContain("Approved requirements");
+    process.env.EVALUATOR_ENDPOINT = "https://eval.test";
+    process.env.EVALUATOR_MODEL = "mock";
+    process.env.EVALUATOR_API_KEY = "mock";
+    await retryEvaluation(record.id, criteriaFor(record.question));
     const configured = new Engine({
       ...deps,
       config: () => ({
