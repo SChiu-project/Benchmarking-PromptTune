@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import { ArtworkHeader } from "./artwork-header";
 
 export function PageHeading({
   eyebrow,
@@ -19,9 +20,7 @@ export function PageHeading({
         <p>{description}</p>
         {action && <div className="page-heading-action">{action}</div>}
       </div>
-      <div className="page-heading-art" aria-hidden="true">
-        <span>Claude Monet · Water Lilies, 1906</span>
-      </div>
+      <ArtworkHeader />
     </div>
   );
 }

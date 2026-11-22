@@ -1,10 +1,16 @@
 # Header artwork
 
-Claude Monet, *Water Lilies*, 1906. Art Institute of Chicago, artwork 16568.
+The shared header selects a painting on each route visit, refresh, or return via the browser's back/forward cache. A shuffled bag in sessionStorage shows all four works before starting another cycle and avoids an immediate repeat between cycles. Normal polling and filter changes do not reshuffle. When browser storage is blocked, an in-memory bag supports navigation; reload history cannot be retained in that case.
 
-- Museum record: https://www.artic.edu/artworks/16568/water-lilies
-- Public-domain status verified through https://api.artic.edu/api/v1/artworks/16568?fields=id,title,artist_display,is_public_domain
-- Image source: https://upload.wikimedia.org/wikipedia/commons/a/aa/Claude_Monet_-_Water_Lilies_-_1906%2C_Ryerson.jpg
-- Local image resized to 1200 pixels wide. CSS crops the work for decorative page headers.
+Google Arts & Culture is the discovery/reference source. Captions link to the matching artwork there. Public-domain image copies are stored locally, so rendering does not call Google, Wikimedia, or museum APIs. The selection is curated, not a live feed of the entire Google Arts & Culture collection.
 
-The image is served locally; page rendering does not contact the museum or Wikimedia.
+| Local file                          | Work                                                                   | Google Arts & Culture                                  | Image source / rights                                                                                                                                                  |
+| ----------------------------------- | ---------------------------------------------------------------------- | ------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `monet-water-lilies.jpg`            | Claude Monet, _Water Lilies_, 1906                                     | https://artsandculture.google.com/asset/XwEbNDsEYukiWQ | https://commons.wikimedia.org/wiki/File:Claude_Monet_-_Water_Lilies_-_1906,_Ryerson.jpg · Public domain; Art Institute of Chicago artwork 16568                        |
+| `monet-japanese-footbridge.jpg`     | Claude Monet, _The Japanese Footbridge_, 1899                          | https://artsandculture.google.com/asset/RgG90GYz4QkZ4A | https://commons.wikimedia.org/wiki/File:Claude_Monet,_The_Japanese_Footbridge,_1899,_NGA_74796.jpg · CC0; National Gallery of Art                                      |
+| `caillebotte-paris-rainy-day.jpg`   | Gustave Caillebotte, _Paris Street; Rainy Day_, 1877                   | https://artsandculture.google.com/asset/5wEUCOlEf-EaVQ | https://commons.wikimedia.org/wiki/File:Gustave_Caillebotte_-_Paris_Street;_Rainy_Day_-_Google_Art_Project.jpg · Public domain; Art Institute of Chicago artwork 20684 |
+| `pissarro-boulevard-montmartre.jpg` | Camille Pissarro, _The Boulevard Montmartre on a Winter Morning_, 1897 | https://artsandculture.google.com/asset/4wGJB3rAyAmk2w | https://commons.wikimedia.org/wiki/File:The_Boulevard_Montmartre_on_a_Winter_Morning_MET_DT1906.jpg · CC0; Metropolitan Museum of Art                                  |
+
+Museum public-domain status for the Chicago works was verified through `https://api.artic.edu/api/v1/artworks/{id}?fields=id,title,is_public_domain`. Footbridge and Montmartre image licenses were verified using Wikimedia Commons image metadata (`LicenseShortName: CC0`). Images are resized to a maximum edge of 1200 pixels and cropped by CSS for the decorative header.
+
+To expand the collection, add a local image with verified reuse rights and an entry in `lib/artwork.ts`. Bump `artworkStorageKey` when changing the catalog so an existing session starts with a fresh bag.

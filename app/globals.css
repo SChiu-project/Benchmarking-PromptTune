@@ -320,19 +320,24 @@ main {
 }
 .page-heading-art {
   position: relative;
-  background: #84928a url("/art/monet-water-lilies.jpg") center 55% / cover;
+  background: #e1e6df center 55% / cover;
   min-height: 100%;
   border-left: 1px solid var(--line);
 }
-.page-heading-art > span {
+.page-heading-art > a {
   position: absolute;
   right: 12px;
   bottom: 12px;
   padding: 5px 9px;
   background: #fffefaef;
   color: #3a4c53;
-  font-size: 10px;
+  font-size: 12px;
   border-radius: 4px;
+  max-width: calc(100% - 24px);
+  line-height: 1.4;
+}
+.page-heading-art > a:hover {
+  text-decoration: underline;
 }
 .panel {
   background: var(--surface);
@@ -2246,8 +2251,8 @@ main:focus {
     border-top: 1px solid var(--line);
     background-position: center 60%;
   }
-  .page-heading-art > span {
-    font-size: 10px;
+  .page-heading-art > a {
+    font-size: 11px;
     bottom: 8px;
     right: 8px;
   }
