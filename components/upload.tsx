@@ -604,6 +604,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                   ? Object.keys(review.folders)[0]
                   : null
               }
+              folders={Object.keys(review.folders)}
               disabled={testing || starting}
               onChange={(overrides, invalid, selection) => {
                 setPromptOverrides(overrides);

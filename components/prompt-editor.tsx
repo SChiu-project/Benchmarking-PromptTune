@@ -16,11 +16,13 @@ import { api } from "../lib/api-client";
 export function PromptEditor({
   projectId,
   folder,
+  folders = [],
   disabled,
   onChange,
 }: {
   projectId: string;
   folder: string | null;
+  folders?: string[];
   disabled: boolean;
   onChange: (
     overrides: PromptOverrides | undefined,
@@ -29,7 +31,12 @@ export function PromptEditor({
   ) => void;
 }) {
   const [mode, setMode] = useState<"cms" | "manual">("cms");
-  const [promptFolder, setPromptFolder] = useState(folder || "ROOT");
+  const choices = folders.length ? folders : folder ? [folder] : [];
+  const [documentFolder, setDocumentFolder] = useState(
+    folder || choices[0] || "",
+  );
+  const scope = folder || documentFolder;
+  const [promptFolder, setPromptFolder] = useState(scope || "ROOT");
   const [json, setJson] = useState("");
   const [baseline, setBaseline] = useState<PromptBaseline | null>(null);
   const [draft, setDraft] = useState<PromptBaseline>({});
@@ -58,7 +65,7 @@ export function PromptEditor({
     const overrides = original ? changedPrompts(original, current) : undefined;
     const blocked =
       Boolean(loaded || overrides) &&
-      (!approved || !folder || (moved && !stale));
+      (!approved || !scope || (moved && !stale));
     onChange(
       blocked ? undefined : overrides,
       blocked,
@@ -81,7 +88,7 @@ export function PromptEditor({
     onChange(undefined, false);
   }
   async function loadCms() {
-    if (!folder || !projectId || busy) return;
+    if (!scope || !projectId || busy) return;
     request.current?.abort();
     const controller = new AbortController();
     request.current = controller;
@@ -95,7 +102,7 @@ export function PromptEditor({
         signal: controller.signal,
         body: JSON.stringify({
           projectId,
-          documentFolder: folder,
+          documentFolder: scope,
           promptFolder: promptFolder.trim(),
         }),
       });
@@ -103,7 +110,7 @@ export function PromptEditor({
       const loaded = promptSnapshotSchema.parse(raw);
       if (
         loaded.projectId !== projectId ||
-        loaded.documentFolder !== folder ||
+        loaded.documentFolder !== scope ||
         loaded.promptFolder !== promptFolder.trim()
       )
         throw new Error(
@@ -194,12 +201,32 @@ export function PromptEditor({
       </p>
       <p>
         Project: <strong>{projectId || "(enter a project ID)"}</strong> ·
-        Document folder: <strong>{folder || "(one folder required)"}</strong>
+        Document folder: <strong>{scope || "(choose a folder)"}</strong>
       </p>
-      {!folder && (
+      {!folder && choices.length > 1 && (
+        <label>
+          Document folder for this prompt test{" "}
+          <select
+            aria-label="Document folder for this prompt test"
+            value={documentFolder}
+            disabled={disabled || busy || Boolean(snapshot)}
+            onChange={(e) => {
+              setDocumentFolder(e.target.value);
+              setPromptFolder(e.target.value || "ROOT");
+              setError("");
+            }}
+          >
+            {choices.map((name) => (
+              <option key={name} value={name}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
+      {!scope && (
         <p className="prompt-warning">
-          Prompt testing requires one CSV folder. Standard benchmarks can use
-          multiple folders.
+          Add a folder column, or choose a document folder, before loading CMS.
         </p>
       )}
       {mode === "cms" ? (
@@ -229,7 +256,7 @@ export function PromptEditor({
                   disabled ||
                   busy ||
                   !projectId ||
-                  !folder ||
+                  !scope ||
                   !promptFolder.trim()
                 }
                 onClick={() => void loadCms()}
@@ -289,7 +316,7 @@ export function PromptEditor({
                   saved ROOT version. Runtime matching remains unverified.
                 </p>
               )}
-              {!snapshot.isBase && snapshot.promptFolder !== folder && (
+              {!snapshot.isBase && snapshot.promptFolder !== scope && (
                 <p className="prompt-warning">
                   Prompt and document folders differ. Confirm this source is
                   appropriate; runtime matching is unverified.
@@ -456,7 +483,7 @@ export function PromptEditor({
             <input
               type="checkbox"
               checked={confirmed}
-              disabled={disabled || busy || !folder || Boolean(error)}
+              disabled={disabled || busy || !scope || Boolean(error)}
               onChange={(e) => {
                 setConfirmed(e.target.checked);
                 notify(baseline, draft, e.target.checked);
