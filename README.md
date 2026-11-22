@@ -4,6 +4,10 @@ A benchmark workspace for uploading test questions, calling Doc Search, inspecti
 
 **Hosting on Vercel:** follow [DEPLOYMENT.md](DEPLOYMENT.md). The hosted mode uses PostgreSQL and durable Vercel Workflows. Local mode keeps JSON storage and the independent process worker. The fulfillment explanation column works with existing saved evaluations.
 
+## UI branding and implementation
+
+Use the [UI handbook](UI_HANDBOOK.md) for the shared visual identity, design tokens, component patterns, responsive rules, artwork shuffling, and guidance for related web apps.
+
 ## Requirement evaluation
 
 New benchmarks support approved requirement checklists, deterministic fulfillment scoring, critical pass/fail gates, review decisions for incomplete evidence, source grounding, and versioned regrading without rerunning Doc Search. Import criteria in the CSV review dialog; without approved requirements, new answers are saved and grading is skipped. Historical scores remain labeled as legacy holistic scores. See [EVALUATION_GUIDE.md](EVALUATION_GUIDE.md) for criteria examples, calibration, paired comparison reports and operational limits.
