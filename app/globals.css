@@ -2351,3 +2351,23 @@ main:focus {
 .cms-approval .checkbox { display: flex; align-items: flex-start; gap: 10px; margin: 20px 0; }
 @media (max-width: 600px) { .cms-approval dl { grid-template-columns: 1fr; gap: 6px; } .cms-approval dd { margin-bottom: 10px; } }
 .cms-approval-shell { padding: 24px 16px; min-height: 100vh; }
+
+.prompt-editor > select {
+  width: 100%; max-width: 480px; padding: 10px 12px;
+  border: 1px solid var(--line); border-radius: 6px;
+  color: var(--text); background: var(--surface, white); font: inherit;
+}
+.prompt-custom-folder { margin: 12px 0; }
+.prompt-custom-folder form { display: flex; align-items: end; flex-wrap: wrap; gap: 12px; padding: 12px 0; }
+.prompt-custom-folder label { display: grid; gap: 6px; }
+.prompt-custom-folder input { padding: 9px; border: 1px solid var(--line); border-radius: 6px; font: inherit; }
+.prompt-folder-confirm { border-left: 3px solid var(--red, #a73535); padding: 4px 14px 12px; margin: 14px 0; }
+.prompt-section-list { display: grid; gap: 20px; margin: 20px 0; }
+.prompt-section-card { min-width: 0; border: 1px solid var(--line); border-radius: 9px; overflow: hidden; background: var(--surface, white); }
+.prompt-section-card.prompt-changed { border-color: var(--green, #557564); }
+.prompt-section-card > header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 8px; padding: 14px 18px; border-bottom: 1px solid var(--line); background: var(--bg, #f8f8f4); }
+.prompt-section-card h3 { margin: 0; font-size: 15px; }
+.prompt-section-card > header > span { color: var(--muted); font-size: 11px; }
+.prompt-editor .prompt-section-card > fieldset { margin: 0; padding: 4px 18px 18px; border: 0; border-radius: 0; }
+.prompt-section-card > p { padding: 0 18px; }
+.prompt-section-card .prompt-language-tabs { margin-top: 14px; }

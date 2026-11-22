@@ -30,6 +30,10 @@ export const promptOverridesSchema = promptBaselineSchema.refine(
 );
 export type PromptOverrides = z.infer<typeof promptOverridesSchema>;
 export type PromptBaseline = z.infer<typeof promptBaselineSchema>;
+export const cmsFolderListSchema = z.object({
+  projectId: z.string().min(1).max(500),
+  folders: z.array(z.string().min(1).max(500)).max(10001),
+});
 export const promptSnapshotSchema = z.object({
   id: z.uuid(),
   workspace: z.string(),

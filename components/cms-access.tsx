@@ -30,9 +30,11 @@ const post = (body: unknown) =>
 export function CmsAccess({
   projectId,
   disabled,
+  onAccessChange,
 }: {
   projectId: string;
   disabled: boolean;
+  onAccessChange?: (authorized: boolean) => void;
 }) {
   const [status, setStatus] = useState<SessionStatus | null>(null);
   const [option, setOption] = useState<"login" | "request">("login");
@@ -98,6 +100,9 @@ export function CmsAccess({
   }
   const authorized =
     status?.connected && status.connection?.projects.includes(projectId);
+  useEffect(() => {
+    onAccessChange?.(Boolean(authorized));
+  }, [authorized, onAccessChange]);
   return (
     <section className="cms-access" aria-label="CMS access">
       <h3>Connect to CMS</h3>

@@ -10,6 +10,7 @@ import {
 import { POST as approvalPost } from "../app/api/cms/approval/route";
 import { POST as loadPost } from "../app/api/cms/prompts/load/route";
 import { POST as checkPost } from "../app/api/cms/prompts/check/route";
+import { GET as foldersGet } from "../app/api/cms/folders/route";
 import { readState, transaction, createRun } from "../lib/store";
 import { cmsReadAccess } from "../lib/cms-access";
 import { proxy } from "../proxy";
@@ -152,6 +153,19 @@ beforeEach(async () => {
       return Response.json({ id: "email-id" });
     if (url.pathname === "/cms/auth/login") return Response.json(credentials);
     if (url.pathname === "/cms/user/me") return Response.json(profile);
+    if (url.pathname.endsWith("/documentSearch/v2/paths"))
+      return Response.json({
+        isSuccess: true,
+        paths: [
+          '["folder-b", "child"]',
+          '["folder-a"]',
+          '["folder-b"]',
+          "not-json",
+          "[5]",
+          "[]",
+          '[""]',
+        ],
+      });
     if (
       url.pathname === "/cms/auth/oneTimePassword" ||
       url.pathname === "/cms/auth/totp/confirm"
@@ -817,4 +831,62 @@ it("does not treat a supervisor login username as a verified contact email", asy
   expect(await response.json()).toMatchObject({
     code: "CMS_SUPERVISOR_MISMATCH",
   });
+});
+
+it("extracts the authorized project's folder inventory with ROOT first and no duplicate or malformed names", async () => {
+  const c = await login();
+  const response = await foldersGet(
+    c.req("/api/cms/folders?projectId=project-a"),
+  );
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(await response.json()).toEqual({
+    projectId: "project-a",
+    folders: ["ROOT", "folder-a", "folder-b"],
+  });
+  const pathCall = fetcher.mock.calls.find(([url]) =>
+    String(url).endsWith("/cms/project/project-a/documentSearch/v2/paths"),
+  );
+  expect(pathCall?.[1]).toMatchObject({
+    method: "GET",
+    headers: { token: credentials.token, uid: credentials.uid },
+    redirect: "error",
+    cache: "no-store",
+  });
+});
+it("protects folder discovery with workspace auth, CMS session and project membership", async () => {
+  expect(
+    (
+      await foldersGet(
+        client(false).req("/api/cms/folders?projectId=project-a"),
+      )
+    ).status,
+  ).toBe(401);
+  expect(
+    (await foldersGet(client().req("/api/cms/folders?projectId=project-a")))
+      .status,
+  ).toBe(401);
+  expect(fetcher).not.toHaveBeenCalled();
+  const c = await login();
+  expect(
+    (await foldersGet(c.req("/api/cms/folders?projectId=unknown"))).status,
+  ).toBe(403);
+  expect(
+    fetcher.mock.calls.some(([url]) =>
+      String(url).includes("documentSearch/v2/paths"),
+    ),
+  ).toBe(false);
+});
+it("does not extend a supervisor grant to another project's folder inventory", async () => {
+  const { owner, token } = await emailRequest();
+  const supervisor = await supervisorLogin(token);
+  await supervisor.approval({ action: "approve", token, confirmed: true });
+  expect(
+    (await foldersGet(owner.req("/api/cms/folders?projectId=project-a")))
+      .status,
+  ).toBe(200);
+  expect(
+    (await foldersGet(owner.req("/api/cms/folders?projectId=project-b")))
+      .status,
+  ).toBe(403);
 });
