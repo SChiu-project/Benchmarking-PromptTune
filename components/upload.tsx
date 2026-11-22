@@ -65,6 +65,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
       PromptSelection | undefined
     >(),
     [promptBlocked, setPromptBlocked] = useState(false),
+    [promptFolder, setPromptFolder] = useState<string | undefined>(),
     [criteriaQuestions, setCriteriaQuestions] = useState<
       Question[] | undefined
     >(),
@@ -171,6 +172,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
       setPromptOverrides(undefined);
       setPromptSelection(undefined);
       setPromptBlocked(false);
+      setPromptFolder(undefined);
       setPromptEditorKey((value) => value + 1);
       setDimensionSelection(undefined);
       setDimensionBlocked(false);
@@ -182,8 +184,17 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
       if (input.current) input.current.value = "";
     }
   }
+  // Prompt tests apply to one document folder; the server rejects mixed-folder
+  // prompt runs, so only that folder's questions are sent.
+  const allQuestions = criteriaQuestions ?? review?.questions ?? [];
+  const promptActive = Boolean(promptOverrides || promptSelection);
+  const batchQuestions =
+    promptActive && promptFolder
+      ? allQuestions.filter((q) => q.folder === promptFolder)
+      : allQuestions;
+  const excludedCount = allQuestions.length - batchQuestions.length;
   async function testFirst() {
-    if (!review?.questions.length || testing) return;
+    if (!batchQuestions.length || testing) return;
     setTesting(true);
     setTest(null);
     setTestError("");
@@ -192,7 +203,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: review.questions[0],
+          question: batchQuestions[0],
           projectId: projectId.trim(),
           promptOverrides,
           promptSelection,
@@ -215,7 +226,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          questions: criteriaQuestions ?? review.questions,
+          questions: batchQuestions,
           concurrency,
           projectId: projectId.trim(),
           promptOverrides,
@@ -232,7 +243,8 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     }
   }
   const blocked =
-    !review?.questions.length ||
+    !review ||
+    !batchQuestions.length ||
     promptBlocked ||
     criteriaBlocked ||
     dimensionBlocked ||
@@ -607,9 +619,10 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
               }
               folders={Object.keys(review.folders)}
               disabled={testing || starting}
-              onChange={(overrides, invalid, selection) => {
+              onChange={(overrides, invalid, selection, documentFolder) => {
                 setPromptOverrides(overrides);
                 setPromptSelection(selection);
+                setPromptFolder(documentFolder);
                 setPromptBlocked(invalid);
                 submissionKey.current = crypto.randomUUID();
                 setTest(null);
@@ -617,6 +630,15 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                 setTestError("");
               }}
             />
+            {promptActive && promptFolder && excludedCount > 0 && (
+              <div className="alert info" role="status">
+                Prompt testing applies to one document folder. The test and
+                batch will run the {batchQuestions.length} question
+                {batchQuestions.length === 1 ? "" : "s"} in{" "}
+                <strong>{promptFolder}</strong> and leave out {excludedCount}{" "}
+                from other folders. Clear the prompt test to run every question.
+              </div>
+            )}
             <p className="muted">
               Try the synthetic{" "}
               <a href="/requirements-example.csv" download>
@@ -791,7 +813,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
             >
               {starting
                 ? "Starting…"
-                : `Start batch · ${review.questions.length} questions`}
+                : `Start batch · ${batchQuestions.length} questions`}
               <ArrowRight size={16} />
             </button>
           </div>

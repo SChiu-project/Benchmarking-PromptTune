@@ -30,6 +30,7 @@ export function PromptEditor({
     overrides: PromptOverrides | undefined,
     blocked: boolean,
     selection?: PromptSelection,
+    documentFolder?: string,
   ) => void;
 }) {
   const [mode, setMode] = useState<"cms" | "manual">("cms");
@@ -118,6 +119,7 @@ export function PromptEditor({
       blocked ? undefined : overrides,
       blocked,
       loaded ? { snapshotId: loaded.id, allowStale: stale } : undefined,
+      loaded?.documentFolder ?? (overrides ? scope || undefined : undefined),
     );
   }
   function reset(nextMode = mode) {

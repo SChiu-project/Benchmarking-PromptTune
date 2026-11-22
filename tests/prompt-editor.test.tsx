@@ -260,3 +260,35 @@ it("ignores a stale load response after clearing and switching folders", async (
     ).value,
   ).toBe("folder-b background EN");
 });
+it("reports the chosen document folder so a mixed-folder CSV batch can be limited to it", async () => {
+  const onChange = vi.fn();
+  const view = render(
+    <PromptEditor
+      projectId="project-a"
+      folder={null}
+      folders={["docs", "other-docs"]}
+      disabled={false}
+      onChange={onChange}
+    />,
+  );
+  view.container.querySelector("details")!.open = true;
+  await screen.findByRole("option", { name: "folder-b" });
+  fireEvent.change(
+    screen.getByLabelText("Document folder for this prompt test"),
+    { target: { value: "other-docs" } },
+  );
+  await load("folder-a");
+  fireEvent.change(
+    screen.getByRole("textbox", { name: "Agent background · English" }),
+    { target: { value: "Revised background" } },
+  );
+  fireEvent.click(
+    screen.getByRole("checkbox", { name: /I checked the project/ }),
+  );
+  const [overrides, blocked, selection, documentFolder] =
+    onChange.mock.lastCall!;
+  expect(blocked).toBe(false);
+  expect(overrides.agent_background_dto.en).toBe("Revised background");
+  expect(selection.snapshotId).toBeTruthy();
+  expect(documentFolder).toBe("other-docs");
+});
