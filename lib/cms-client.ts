@@ -12,23 +12,7 @@ export class CmsError extends Error {
     super(message);
   }
 }
-export function cmsSettings(projectId: string) {
-  const projects = (process.env.CMS_PROJECT_IDS ?? "")
-    .split(",")
-    .map((v) => v.trim())
-    .filter(Boolean);
-  if (!projects.length)
-    throw new CmsError(
-      "CMS loading is not configured. Set CMS_PROJECT_IDS and server-side CMS credentials.",
-      503,
-      "CMS_NOT_CONFIGURED",
-    );
-  if (!projects.includes(projectId))
-    throw new CmsError(
-      "This project is not enabled for CMS reads in this workspace.",
-      403,
-      "CMS_PROJECT_DENIED",
-    );
+export function cmsSettings() {
   let base: URL;
   try {
     base = new URL(
@@ -63,7 +47,22 @@ export function cmsSettings(projectId: string) {
     );
   return { baseUrl: base.toString().replace(/\/$/, ""), timeoutMs };
 }
-async function cmsHeaders() {
+export type CmsCredentials = { token: string; uid: string };
+export type CmsReadAccess = {
+  credentials: CmsCredentials;
+  sessionHash: string;
+};
+async function cmsHeaders(credentials?: CmsCredentials) {
+  if (credentials)
+    return { ...credentials, "x-source": "cms", Accept: "application/json" };
+  // Local scripts may use the local user's connector session. Hosted reads
+  // always require a browser session; environment credentials cannot bypass approval.
+  if (isVercel())
+    throw new CmsError(
+      "Sign in to CMS or request supervisor access.",
+      401,
+      "CMS_AUTH_REQUIRED",
+    );
   let token = process.env.CMS_READ_TOKEN,
     uid = process.env.CMS_READ_UID;
   if (!token && !uid && process.env.CMS_SESSION_FILE && !isVercel()) {
@@ -97,9 +96,10 @@ export async function readCmsPrompt(
   projectId: string,
   folder: string,
   metadataOnly = false,
+  credentials?: CmsCredentials,
 ): Promise<unknown> {
-  const settings = cmsSettings(projectId),
-    headers = await cmsHeaders();
+  const settings = cmsSettings(),
+    headers = await cmsHeaders(credentials);
   const url = new URL(
     `${settings.baseUrl}/graph/chatbot-prompts/versions/latest`,
   );

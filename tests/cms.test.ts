@@ -59,7 +59,6 @@ beforeEach(async () => {
   dir = await mkdtemp(join(tmpdir(), "cms-test-"));
   Object.assign(process.env, {
     DATA_DIR: dir,
-    CMS_PROJECT_IDS: "project-a",
     CMS_READ_TOKEN: "test-secret",
     CMS_READ_UID: "reader",
     DOC_SEARCH_ENDPOINT: "https://dev.setsailapi.com/nlp/rag/docSearchConvo",
@@ -94,16 +93,20 @@ describe("CMS read boundary", () => {
     expect(options.body).toBeUndefined();
     expect(options.method).toBeUndefined(); // fetch defaults to GET
   });
-  it("enforces configured project access before any network request", async () => {
+  it("requires credentials before network access and keeps project selection configurable", async () => {
     const f = upstream();
-    await expect(readCmsPrompt("other", "ROOT")).rejects.toMatchObject({
-      code: "CMS_PROJECT_DENIED",
-    });
-    delete process.env.CMS_PROJECT_IDS;
+    delete process.env.CMS_READ_TOKEN;
+    delete process.env.CMS_READ_UID;
     await expect(readCmsPrompt("project-a", "ROOT")).rejects.toMatchObject({
-      code: "CMS_NOT_CONFIGURED",
+      code: "CMS_AUTH_REQUIRED",
     });
     expect(f).not.toHaveBeenCalled();
+    process.env.CMS_READ_TOKEN = "test-secret";
+    process.env.CMS_READ_UID = "reader";
+    await readCmsPrompt("another-selected-project", "ROOT");
+    expect(f.mock.calls[0][0].searchParams.get("project_id")).toBe(
+      "another-selected-project",
+    );
   });
   it.each([401, 403, 404, 429, 500])(
     "returns sanitized actionable errors for HTTP %s",

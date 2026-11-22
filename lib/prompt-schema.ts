@@ -33,6 +33,10 @@ export type PromptBaseline = z.infer<typeof promptBaselineSchema>;
 export const promptSnapshotSchema = z.object({
   id: z.uuid(),
   workspace: z.string(),
+  accessSessionHash: z
+    .string()
+    .regex(/^[a-f0-9]{64}$/)
+    .optional(),
   environment: z.url(),
   searchEndpoint: z.url(),
   projectId: z.string().min(1).max(500),

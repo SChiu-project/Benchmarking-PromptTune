@@ -2322,3 +2322,27 @@ main:focus {
     transition: none !important;
   }
 }
+
+/* CMS authentication and supervisor approval */
+.cms-access {
+  border: 1px solid var(--border, #deded8);
+  border-radius: 12px;
+  padding: 20px;
+  margin: 18px 0;
+  background: var(--surface, #fff);
+}
+.cms-access h3 { margin: 0 0 8px; }
+.cms-access fieldset { border: 0; margin: 12px 0; padding: 0; min-width: 0; }
+.cms-access legend { font-weight: 600; margin-bottom: 12px; }
+.cms-access label:not(.checkbox) { display: grid; gap: 6px; margin: 12px 0; }
+.cms-access input:not([type="checkbox"]) { width: 100%; max-width: 420px; padding: 10px 12px; border: 1px solid var(--border, #deded8); border-radius: 7px; font: inherit; }
+.cms-access-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin: 12px 0; }
+.cms-access button[aria-pressed="true"] { outline: 2px solid currentColor; outline-offset: 2px; }
+.cms-access .prompt-warning { color: #9c331e; overflow-wrap: anywhere; }
+.cms-approval { max-width: 760px; margin: 24px auto; }
+.cms-approval dl { display: grid; grid-template-columns: minmax(120px, 180px) minmax(0, 1fr); gap: 12px; margin: 24px 0; }
+.cms-approval dt { font-weight: 600; }
+.cms-approval dd { margin: 0; overflow-wrap: anywhere; }
+.cms-approval .checkbox { display: flex; align-items: flex-start; gap: 10px; margin: 20px 0; }
+@media (max-width: 600px) { .cms-approval dl { grid-template-columns: 1fr; gap: 6px; } .cms-approval dd { margin-bottom: 10px; } }
+.cms-approval-shell { padding: 24px 16px; min-height: 100vh; }

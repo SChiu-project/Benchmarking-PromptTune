@@ -12,6 +12,7 @@ import {
   type PromptSelection,
 } from "@/lib/prompt-schema";
 import { api } from "../lib/api-client";
+import { CmsAccess } from "./cms-access";
 
 export function PromptEditor({
   projectId,
@@ -231,6 +232,7 @@ export function PromptEditor({
       )}
       {mode === "cms" ? (
         <>
+          <CmsAccess projectId={projectId} disabled={disabled || busy} />
           <label htmlFor="cms-prompt-folder">Prompt source folder</label>
           <input
             id="cms-prompt-folder"

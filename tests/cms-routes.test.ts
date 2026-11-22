@@ -39,24 +39,25 @@ beforeEach(async () => {
     DATA_DIR: dir,
     APP_PASSWORD: "password-for-tests",
     APP_USERNAME: "benchmark",
-    CMS_PROJECT_IDS: "project-a",
     CMS_READ_TOKEN: "not-a-real-token",
     CMS_READ_UID: "reader",
     DOC_SEARCH_ENDPOINT: "https://dev.setsailapi.com/nlp/rag/docSearchConvo",
   });
   vi.stubGlobal(
     "fetch",
-    vi.fn().mockImplementation(async () =>
-      Response.json({
-        ...scope,
-        project_id: "project-a",
-        folder_name: "ROOT",
-        source_type: "chatbot",
-        prompt_version: 1,
-        version_id: "saved-version",
-        is_active: true,
-        prompts: { agent_background_dto: dto },
-      }),
+    vi.fn().mockImplementation(async (url: URL) =>
+      url.searchParams.get("project_id") !== "project-a"
+        ? Response.json({}, { status: 403 })
+        : Response.json({
+            ...scope,
+            project_id: "project-a",
+            folder_name: "ROOT",
+            source_type: "chatbot",
+            prompt_version: 1,
+            version_id: "saved-version",
+            is_active: true,
+            prompts: { agent_background_dto: dto },
+          }),
     ),
   );
 });

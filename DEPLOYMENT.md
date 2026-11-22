@@ -49,7 +49,7 @@ Set these in Vercel, not in GitHub source. Redeploy after configuration changes.
 
 Your existing evaluator settings are in the original app's ignored `.env.local`. Copy those values directly into Vercel's environment settings; the clean export intentionally omits them. Never use `NEXT_PUBLIC_` or `VITE_` for credentials.
 
-This is a single shared workspace, protected with HTTP Basic authentication. The browser asks for the configured username/password. Hosted requests fail closed until a sufficiently long password is set. This is not a multi-tenant account system. All holders of that password can see and manage the workspace's runs. Vercel's own Workflow routes use SDK/platform authentication and are intentionally excluded from application Basic auth.
+This is a single shared workspace, protected with HTTP Basic authentication. The browser asks for the configured username/password. Hosted requests fail closed until a sufficiently long password is set. This is not a multi-tenant account system. All holders of that password can see and manage the workspace's runs. Vercel's own Workflow routes use SDK/platform authentication and are intentionally excluded from application Basic auth. The CMS supervisor approval page (`/cms/approve`) and its API (`/api/cms/approval`) also bypass Basic auth, but require a valid emailed capability and authenticated CMS identity for approval decisions. No other CMS route bypasses workspace authentication.
 
 ## 5. Deploy and check
 
@@ -60,6 +60,12 @@ Inspect the **Workflows** section in Vercel if a batch does not progress. A disp
 If you canceled a workflow in Vercel or the platform marked it failed, use **Recover stopped workflow** in that run's Records view. Recovery verifies the workflow is terminal and waits for any in-flight request leases to expire. It marks unfinished work interrupted/skipped and preserves saved answers. It does not repeat searches. You can then start an intentional new batch or retry grading saved answers. Never clear an active database row by hand.
 
 The automated GitHub check builds the app, checks TypeScript/lint, runs deterministic tests, and exercises the Workflow HTTP path with both JSON and PostgreSQL storage against isolated local mock services. PostgreSQL checks use the actual production connection driver with a disposable local PostgreSQL engine. No real evaluator key is needed for CI.
+
+## CMS login and supervisor emails
+
+Users sign into CMS through **Test revised prompts → Connect to CMS**. Their selected project is checked against their CMS account; do not set `CMS_PROJECT_IDS`, `CMS_READ_TOKEN`, or `CMS_READ_UID` for hosted users. Tokens are encrypted in the existing PostgreSQL workspace snapshot, using optional `CMS_SESSION_SECRET` or the existing `APP_PASSWORD` as a fallback. Changing the encryption secret invalidates sessions and requires new sign-ins.
+
+For **Ask a supervisor**, set `RESEND_API_KEY` and `CMS_EMAIL_FROM` (an authorized sender in that account), then redeploy. Direct CMS login works without email delivery. An optional `APP_URL` must match the deployment host used by the requester so approval decisions reach the same namespace/database. See [CMS_PROMPTS.md](CMS_PROMPTS.md) for the flow, limits, revocation, known OTP validation gap, and shared-workspace visibility.
 
 ## Optional: bring existing local results
 

@@ -17,6 +17,14 @@ export function Shell({
   hosted?: boolean;
 }) {
   const path = usePathname();
+  // The emailed approval page is standalone: no protected workspace navigation
+  // or link prefetches should trigger Basic-auth requests for a supervisor.
+  if (path === "/cms/approve")
+    return (
+      <main id="main-content" className="cms-approval-shell">
+        {children}
+      </main>
+    );
   return (
     <div className="workspace">
       <a className="skip-link" href="#main-content">

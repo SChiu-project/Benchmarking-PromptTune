@@ -1,6 +1,11 @@
 import { createHash, randomUUID } from "node:crypto";
 import { z } from "zod";
-import { cmsSettings, readCmsPrompt, CmsError } from "./cms-client";
+import {
+  cmsSettings,
+  readCmsPrompt,
+  CmsError,
+  type CmsReadAccess,
+} from "./cms-client";
 import {
   localizedPromptSchema,
   promptSections,
@@ -96,8 +101,8 @@ export function normalizeCmsPrompt(
       .digest("hex"),
   };
 }
-function sourceScope(projectId: string) {
-  const { baseUrl } = cmsSettings(projectId),
+function sourceScope() {
+  const { baseUrl } = cmsSettings(),
     endpoint = searchConfig().endpoint;
   if (new URL(baseUrl).origin !== new URL(endpoint).origin)
     throw new CmsError(
@@ -107,12 +112,20 @@ function sourceScope(projectId: string) {
     );
   return { environment: baseUrl, searchEndpoint: endpoint };
 }
-export async function loadPromptSnapshot(input: z.infer<typeof cmsLoadSchema>) {
+export async function loadPromptSnapshot(
+  input: z.infer<typeof cmsLoadSchema>,
+  access?: CmsReadAccess,
+) {
   const scope = cmsLoadSchema.parse(input),
-    environment = sourceScope(scope.projectId);
+    environment = sourceScope();
   // Network reads happen before acquiring the workspace transaction lock.
   const prompt = normalizeCmsPrompt(
-    await readCmsPrompt(scope.projectId, scope.promptFolder),
+    await readCmsPrompt(
+      scope.projectId,
+      scope.promptFolder,
+      false,
+      access?.credentials,
+    ),
     scope.projectId,
     scope.promptFolder,
   );
@@ -120,6 +133,7 @@ export async function loadPromptSnapshot(input: z.infer<typeof cmsLoadSchema>) {
   const snapshot: PromptSnapshot = {
     id: randomUUID(),
     workspace: workspaceNamespace(),
+    ...(access ? { accessSessionHash: access.sessionHash } : {}),
     ...scope,
     ...environment,
     ...prompt,
@@ -139,7 +153,7 @@ export function assertSnapshotScope(
   projectId: string,
   folders: string[],
 ) {
-  const scope = sourceScope(projectId);
+  const scope = sourceScope();
   if (
     snapshot.workspace !== workspaceNamespace() ||
     snapshot.projectId !== projectId ||
@@ -173,11 +187,28 @@ export async function getPromptSnapshot(id: string) {
   assertSnapshotScope(snapshot, snapshot.projectId, [snapshot.documentFolder]);
   return snapshot;
 }
-export async function checkPromptSnapshot(snapshot: PromptSnapshot) {
+export async function checkPromptSnapshot(
+  snapshot: PromptSnapshot,
+  access?: CmsReadAccess,
+) {
+  if (
+    snapshot.accessSessionHash &&
+    snapshot.accessSessionHash !== access?.sessionHash
+  )
+    throw new CmsError(
+      "This prompt was loaded in another browser session. Load it again using your CMS access.",
+      403,
+      "CMS_SESSION_MISMATCH",
+    );
   assertSnapshotScope(snapshot, snapshot.projectId, [snapshot.documentFolder]);
   // Full reads work for both saved versions and base configurations (whose metadata read 404s).
   const current = normalizeCmsPrompt(
-    await readCmsPrompt(snapshot.projectId, snapshot.promptFolder),
+    await readCmsPrompt(
+      snapshot.projectId,
+      snapshot.promptFolder,
+      false,
+      access?.credentials,
+    ),
     snapshot.projectId,
     snapshot.promptFolder,
   );

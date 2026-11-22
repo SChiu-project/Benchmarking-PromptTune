@@ -21,7 +21,7 @@ import {
   getPromptSnapshot,
 } from "./cms-prompts";
 import { changedPrompts, type PromptSnapshot } from "./prompt-schema";
-import { CmsError } from "./cms-client";
+import { CmsError, type CmsReadAccess } from "./cms-client";
 import { evaluatorConfig } from "./evaluator";
 import { createCampaign } from "./evaluation-snapshot";
 import {
@@ -160,6 +160,7 @@ export function recover(s: State) {
 export async function createRun(
   input: CreateRunInput,
   kind: Run["kind"] = "batch",
+  cmsAccess?: (projectId: string) => Promise<CmsReadAccess | undefined>,
 ) {
   const body = createRunSchema.parse(input),
     config = configSchema.parse({
@@ -247,7 +248,10 @@ export async function createRun(
     });
     if (overrides) config.promptOverrides = overrides;
     else delete config.promptOverrides;
-    const check = await checkPromptSnapshot(snapshot);
+    const check = await checkPromptSnapshot(
+      snapshot,
+      await cmsAccess?.(config.projectId),
+    );
     if (check.changed && !body.promptSelection.allowStale)
       throw new CmsError(
         "CMS changed since this prompt was loaded. Check the source, reload it, or acknowledge using the saved baseline.",

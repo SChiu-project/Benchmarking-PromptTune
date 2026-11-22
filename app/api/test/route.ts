@@ -8,6 +8,7 @@ import {
 import { fail, jsonBody } from "@/lib/http";
 import { z } from "zod";
 import { promptSelectionSchema } from "@/lib/prompt-schema";
+import { cmsReadAccess } from "@/lib/cms-access";
 export const runtime = "nodejs";
 export async function POST(req: Request) {
   try {
@@ -31,6 +32,7 @@ export async function POST(req: Request) {
         promptSelection: body.promptSelection,
       },
       "test",
+      (projectId) => cmsReadAccess(req, projectId),
     );
     await dispatchRun(id);
     return Response.json({ id }, { status: 202 });

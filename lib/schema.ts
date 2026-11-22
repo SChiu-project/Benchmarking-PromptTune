@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { cmsAccessStateSchema } from "./cms-access-schema";
 import {
   criteriaSchema,
   requirementResultSchema,
@@ -189,6 +190,7 @@ export const stateSchema = z.object({
   runs: z.array(runSchema),
   promptSnapshots: z.array(promptSnapshotSchema).max(20).optional(),
   preferenceComparisons: z.array(preferenceComparisonSchema).max(20).optional(),
+  cmsAccess: cmsAccessStateSchema.optional(),
 });
 export type State = z.infer<typeof stateSchema>;
 export const createRunSchema = z
