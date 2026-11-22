@@ -1,5 +1,10 @@
 import { z } from "zod";
-import type { Question, SearchConfig, SearchResult } from "./schema";
+import {
+  promptCoversFolder,
+  type Question,
+  type SearchConfig,
+  type SearchResult,
+} from "./schema";
 export function searchConfig(): SearchConfig {
   return {
     endpoint:
@@ -10,6 +15,11 @@ export function searchConfig(): SearchConfig {
   };
 }
 export function searchRequest(q: Question, c: SearchConfig) {
+  const scope =
+    c.promptScopeFolder ?? c.promptProvenance?.snapshot.documentFolder;
+  const prompted =
+    Boolean(c.promptOverrides || c.promptProvenance) &&
+    promptCoversFolder(scope, q.folder);
   return {
     user_queries: [q.query],
     folder_names: [q.folder],
@@ -17,8 +27,8 @@ export function searchRequest(q: Question, c: SearchConfig) {
     doc_search_version: 2,
     stream: false,
     with_reference: true,
-    ...(c.promptOverrides ?? {}),
-    ...(c.promptOverrides || c.promptProvenance ? { use_cache: false } : {}),
+    ...(prompted ? (c.promptOverrides ?? {}) : {}),
+    ...(prompted ? { use_cache: false } : {}),
   };
 }
 const section = z

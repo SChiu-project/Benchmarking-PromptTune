@@ -19,6 +19,7 @@ export async function POST(req: Request) {
         projectId: projectIdSchema.optional(),
         promptOverrides: promptOverridesSchema.optional(),
         promptSelection: promptSelectionSchema.optional(),
+        promptDocumentFolder: z.string().trim().min(1).max(500).optional(),
       })
       .strict()
       .parse(await jsonBody(req));
@@ -30,6 +31,7 @@ export async function POST(req: Request) {
         projectId: body.projectId,
         promptOverrides: body.promptOverrides,
         promptSelection: body.promptSelection,
+        promptDocumentFolder: body.promptDocumentFolder,
       },
       "test",
       (projectId) => cmsReadAccess(req, projectId),

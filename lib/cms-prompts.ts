@@ -13,6 +13,7 @@ import {
   type PromptBaseline,
 } from "./prompt-schema";
 import { workspaceNamespace } from "./runtime";
+import { promptCoversFolder } from "./schema";
 import { searchConfig } from "./doc-search";
 import { readState, transaction } from "./store";
 
@@ -157,8 +158,9 @@ export function assertSnapshotScope(
   if (
     snapshot.workspace !== workspaceNamespace() ||
     snapshot.projectId !== projectId ||
-    folders.length !== 1 ||
-    folders[0] !== snapshot.documentFolder ||
+    !folders.some((folder) =>
+      promptCoversFolder(snapshot.documentFolder, folder),
+    ) ||
     snapshot.environment !== scope.environment ||
     snapshot.searchEndpoint !== scope.searchEndpoint
   )

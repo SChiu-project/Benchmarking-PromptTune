@@ -90,7 +90,7 @@ describe("CSV correctness", () => {
     expect(r.errors).toEqual([]);
     expect(r.questions[0]).toEqual({
       query: "Where, exactly?",
-      folder: "Codex_Benchmark_tool",
+      folder: "ROOT",
       expected_answer: "Level 1\nby the lifts",
       evaluation_comments: "specific",
     });
@@ -107,7 +107,7 @@ describe("CSV correctness", () => {
   });
   it("skips empty queries, resolves folders before dedup, keeps first and different folders", () => {
     const r = reviewCsv(
-      "query,folder,expected_answer\n,foo,none\n A , ,first\nA,Codex_Benchmark_tool,first\nA,other,different\na,,case-sensitive\n",
+      "query,folder,expected_answer\n,foo,none\n A , ,first\nA,ROOT,first\nA,other,different\na,,case-sensitive\n",
     );
     expect([r.total, r.empty, r.duplicates, r.questions.length]).toEqual([
       5, 1, 1, 3,

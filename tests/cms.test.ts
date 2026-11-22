@@ -311,6 +311,87 @@ describe("prompt normalization and provenance", () => {
     expect(searchRequest(q, run.config).use_cache).toBe(false);
     expect(run.config.promptOverrides).toBeUndefined();
   });
+  it("runs a mixed-folder CSV and applies the revised CMS prompt only to the snapshot's document folder", async () => {
+    upstream();
+    const snap = await loadPromptSnapshot(scope);
+    const other = { ...q, query: "Other folder question", folder: "Kiosk" };
+    await createRun({
+      questions: [q, other],
+      concurrency: 1,
+      projectId: "project-a",
+      idempotencyKey: randomUUID(),
+      promptSelection: { snapshotId: snap.id, allowStale: false },
+      promptOverrides: {
+        custom_instruction_dto: { ...dto, zh: "Revised" },
+      },
+    });
+    const run = (await readState()).runs[0];
+    expect(run.records).toHaveLength(2);
+    expect(run.config.promptScopeFolder).toBe(q.folder);
+    expect(searchRequest(q, run.config)).toMatchObject({
+      use_cache: false,
+      custom_instruction_dto: { ...dto, zh: "Revised" },
+    });
+    const normal = searchRequest(other, run.config);
+    expect(normal).not.toHaveProperty("custom_instruction_dto");
+    expect(normal).not.toHaveProperty("use_cache");
+    await expect(
+      createRun({
+        questions: [q, other],
+        concurrency: 1,
+        projectId: "project-a",
+        idempotencyKey: randomUUID(),
+        promptSelection: { snapshotId: snap.id, allowStale: false },
+        promptDocumentFolder: "Kiosk",
+      }),
+    ).rejects.toThrow("does not match the loaded prompt");
+  });
+  it("applies a revised ROOT prompt to questions in every folder", async () => {
+    upstream();
+    const snap = await loadPromptSnapshot({
+      ...scope,
+      documentFolder: "ROOT",
+      promptFolder: "ROOT",
+    });
+    const widget = { ...q, query: "Widget question", folder: "Widget" };
+    const root = { ...q, query: "Root question", folder: "ROOT" };
+    await createRun({
+      questions: [widget, root],
+      concurrency: 1,
+      projectId: "project-a",
+      idempotencyKey: randomUUID(),
+      promptSelection: { snapshotId: snap.id, allowStale: false },
+      promptOverrides: { custom_instruction_dto: { ...dto, zh: "Revised" } },
+    });
+    const run = (await readState()).runs[0];
+    for (const question of [widget, root])
+      expect(searchRequest(question, run.config)).toMatchObject({
+        folder_names: [question.folder],
+        use_cache: false,
+        custom_instruction_dto: { ...dto, zh: "Revised" },
+      });
+  });
+  it("scopes manual JSON overrides to the chosen document folder", async () => {
+    const other = { ...q, query: "Other folder question", folder: "Kiosk" };
+    const input = {
+      questions: [q, other],
+      concurrency: 1,
+      idempotencyKey: randomUUID(),
+      promptOverrides: { custom_instruction_dto: dto },
+    };
+    await expect(createRun(input)).rejects.toThrow(
+      "at least one question in the prompt test's document folder",
+    );
+    await createRun({ ...input, promptDocumentFolder: "Kiosk" });
+    const run = (await readState()).runs[0];
+    expect(searchRequest(other, run.config)).toMatchObject({
+      custom_instruction_dto: dto,
+      use_cache: false,
+    });
+    expect(searchRequest(q, run.config)).not.toHaveProperty(
+      "custom_instruction_dto",
+    );
+  });
   it("blocks stale baselines until acknowledged and copies provenance into runs", async () => {
     upstream();
     const snap = await loadPromptSnapshot(scope);

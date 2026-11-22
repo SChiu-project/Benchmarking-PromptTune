@@ -74,7 +74,7 @@ async function editor() {
   const view = render(
     <PromptEditor
       projectId="project-a"
-      folder="docs"
+      folderCounts={{ docs: 2 }}
       disabled={false}
       onChange={onChange}
     />,
@@ -131,7 +131,7 @@ it("allows switching to another extracted project folder after loading and inval
   );
   expect(JSON.parse(loads.at(-1)![1].body)).toMatchObject({
     projectId: "project-a",
-    documentFolder: "docs",
+    documentFolder: "folder-b",
     promptFolder: "folder-b",
   });
 });
@@ -260,24 +260,38 @@ it("ignores a stale load response after clearing and switching folders", async (
     ).value,
   ).toBe("folder-b background EN");
 });
-it("reports the chosen document folder so a mixed-folder CSV batch can be limited to it", async () => {
+it("treats ROOT as the base of every folder and scopes other sources to their own questions", async () => {
   const onChange = vi.fn();
   const view = render(
     <PromptEditor
       projectId="project-a"
-      folder={null}
-      folders={["docs", "other-docs"]}
+      folderCounts={{ Widget: 1, Kiosk: 1, ROOT: 2 }}
       disabled={false}
       onChange={onChange}
     />,
   );
   view.container.querySelector("details")!.open = true;
   await screen.findByRole("option", { name: "folder-b" });
-  fireEvent.change(
-    screen.getByLabelText("Document folder for this prompt test"),
-    { target: { value: "other-docs" } },
+  expect(
+    screen.queryByLabelText("Document folder for this prompt test"),
+  ).toBeNull();
+  const source = screen.getByLabelText(
+    "Prompt source folder",
+  ) as HTMLSelectElement;
+  expect(source.value).toBe("ROOT");
+  screen.getByText(/Applies to all 4 questions\. Every folder builds on ROOT/);
+  fireEvent.change(source, { target: { value: "Widget" } });
+  screen.getByText(/Applies to the 1 of 4 questions in Widget/);
+  fireEvent.change(source, { target: { value: "folder-b" } });
+  screen.getByText(/No CSV questions are in folder-b/);
+  await load("ROOT");
+  const loads = request.mock.calls.filter(
+    ([url]) => url === "/api/cms/prompts/load",
   );
-  await load("folder-a");
+  expect(JSON.parse(loads.at(-1)![1].body)).toMatchObject({
+    documentFolder: "ROOT",
+    promptFolder: "ROOT",
+  });
   fireEvent.change(
     screen.getByRole("textbox", { name: "Agent background · English" }),
     { target: { value: "Revised background" } },
@@ -285,10 +299,9 @@ it("reports the chosen document folder so a mixed-folder CSV batch can be limite
   fireEvent.click(
     screen.getByRole("checkbox", { name: /I checked the project/ }),
   );
-  const [overrides, blocked, selection, documentFolder] =
-    onChange.mock.lastCall!;
+  const [overrides, blocked, selection, scope] = onChange.mock.lastCall!;
   expect(blocked).toBe(false);
   expect(overrides.agent_background_dto.en).toBe("Revised background");
   expect(selection.snapshotId).toBeTruthy();
-  expect(documentFolder).toBe("other-docs");
+  expect(scope).toBe("ROOT");
 });

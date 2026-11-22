@@ -5,7 +5,12 @@ import {
   requirementResultSchema,
   campaignSchema,
 } from "./evaluation-contract";
-export const DEFAULT_FOLDER = "Codex_Benchmark_tool";
+// ROOT is the base of every folder: CMS appends a folder's prompt and documents
+// after ROOT's, so a ROOT prompt test covers questions in every folder.
+export const DEFAULT_FOLDER = "ROOT";
+export function promptCoversFolder(scope: string | undefined, folder: string) {
+  return !scope || scope === DEFAULT_FOLDER || scope === folder;
+}
 export const projectIdSchema = z.string().trim().min(1).max(500);
 import {
   promptOverridesSchema,
@@ -166,6 +171,9 @@ export const configSchema = z.object({
   timeoutMs: z.number().int().min(100).max(300000),
   promptOverrides: promptOverridesSchema.optional(),
   promptProvenance: promptProvenanceSchema.optional(),
+  // Folder whose questions receive the prompt overrides (ROOT covers all).
+  // Questions in other folders run with their normal CMS prompts. Absent on older runs.
+  promptScopeFolder: z.string().min(1).max(500).optional(),
 });
 export type SearchConfig = z.infer<typeof configSchema>;
 export const runSchema = z.object({
@@ -201,15 +209,23 @@ export const createRunSchema = z
     projectId: projectIdSchema.optional(),
     promptOverrides: promptOverridesSchema.optional(),
     promptSelection: promptSelectionSchema.optional(),
+    promptDocumentFolder: z.string().trim().min(1).max(500).optional(),
     dimensions: dimensionSelectionSchema.optional(),
   })
   .strict()
   .refine(
-    (value) =>
-      (!value.promptOverrides && !value.promptSelection) ||
-      new Set(value.questions.map((q) => q.folder)).size === 1,
+    (value) => {
+      // A CMS selection is checked against its snapshot's folder in createRun.
+      if (!value.promptOverrides || value.promptSelection) return true;
+      const folders = new Set(value.questions.map((q) => q.folder));
+      return value.promptDocumentFolder
+        ? value.promptDocumentFolder === DEFAULT_FOLDER ||
+            folders.has(value.promptDocumentFolder)
+        : folders.size === 1;
+    },
     {
-      message: "Prompt overrides require questions from one folder.",
+      message:
+        "Prompt overrides need at least one question in the prompt test's document folder.",
       path: ["questions"],
     },
   );
@@ -251,9 +267,13 @@ export function summarize(run: Run) {
   const dimSignatures = new Set(
     dimRecords.map((r) =>
       JSON.stringify({
-        config: r.attempts.at(-1)?.campaign?.dimensions?.dimensions.map(
-          (d) => [d.name, d.promptHash, d.thresholds],
-        ),
+        config: r.attempts
+          .at(-1)
+          ?.campaign?.dimensions?.dimensions.map((d) => [
+            d.name,
+            d.promptHash,
+            d.thresholds,
+          ]),
         naPolicy: r.dimensionSuite!.naPolicy,
       }),
     ),

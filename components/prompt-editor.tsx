@@ -15,16 +15,28 @@ import { api } from "../lib/api-client";
 import { CmsAccess } from "./cms-access";
 import { PromptSectionEditor } from "./prompt-section-editor";
 
+// ROOT is the foundation of every folder: CMS appends a folder's prompt and
+// documents after ROOT's. A ROOT prompt test therefore covers every question;
+// any other source folder covers only the CSV questions in that folder.
+export function promptCoverage(
+  source: string,
+  folderCounts: Record<string, number>,
+) {
+  const total = Object.values(folderCounts).reduce((a, b) => a + b, 0);
+  return {
+    total,
+    covered: source === "ROOT" ? total : (folderCounts[source] ?? 0),
+  };
+}
 export function PromptEditor({
   projectId,
-  folder,
-  folders = [],
+  folderCounts,
   disabled,
   onChange,
 }: {
   projectId: string;
-  folder: string | null;
-  folders?: string[];
+  /** CSV questions per document folder. */
+  folderCounts: Record<string, number>;
   disabled: boolean;
   onChange: (
     overrides: PromptOverrides | undefined,
@@ -34,12 +46,10 @@ export function PromptEditor({
   ) => void;
 }) {
   const [mode, setMode] = useState<"cms" | "manual">("cms");
-  const choices = folders.length ? folders : folder ? [folder] : [];
-  const [documentFolder, setDocumentFolder] = useState(
-    folder || choices[0] || "",
-  );
-  const scope = folder || documentFolder;
-  const [promptFolder, setPromptFolder] = useState(scope || "ROOT");
+  const [promptFolder, setPromptFolder] = useState("ROOT");
+  // The prompt source folder is also the snapshot's document scope.
+  const scope = promptFolder.trim();
+  const coverage = promptCoverage(scope, folderCounts);
   const [json, setJson] = useState("");
   const [baseline, setBaseline] = useState<PromptBaseline | null>(null);
   const [draft, setDraft] = useState<PromptBaseline>({});
@@ -58,10 +68,7 @@ export function PromptEditor({
   } | null>(null);
   const [folderError, setFolderError] = useState("");
   const [folderRefresh, setFolderRefresh] = useState(0);
-  const [pendingFolder, setPendingFolder] = useState<{
-    documentFolder: string;
-    promptFolder: string;
-  } | null>(null);
+  const [pendingFolder, setPendingFolder] = useState<string | null>(null);
   const [sourceNeedsLoad, setSourceNeedsLoad] = useState(false);
   const request = useRef<AbortController | null>(null);
   useEffect(() => () => request.current?.abort(), []);
@@ -97,6 +104,7 @@ export function PromptEditor({
     ...new Set([
       "ROOT",
       ...extractedFolders,
+      ...Object.keys(folderCounts),
       ...(promptFolder ? [promptFolder] : []),
     ]),
   ];
@@ -139,23 +147,15 @@ export function PromptEditor({
     setSourceNeedsLoad(false);
     onChange(undefined, false);
   }
-  function switchFolder(next: {
-    documentFolder: string;
-    promptFolder: string;
-  }) {
+  function switchFolder(next: string) {
     reset();
-    setDocumentFolder(next.documentFolder);
-    setPromptFolder(next.promptFolder);
+    setPromptFolder(next);
     setSourceNeedsLoad(true);
     // A previous snapshot must never be submitted as the newly selected source.
     onChange(undefined, true);
   }
-  function chooseFolder(next: {
-    documentFolder: string;
-    promptFolder: string;
-  }) {
-    if (next.documentFolder === scope && next.promptFolder === promptFolder)
-      return;
+  function chooseFolder(next: string) {
+    if (next === promptFolder) return;
     if (dirty) setPendingFolder(next);
     else switchFolder(next);
   }
@@ -175,7 +175,7 @@ export function PromptEditor({
         body: JSON.stringify({
           projectId,
           documentFolder: scope,
-          promptFolder: promptFolder.trim(),
+          promptFolder: scope,
         }),
       });
       if (controller.signal.aborted || request.current !== controller) return;
@@ -183,7 +183,7 @@ export function PromptEditor({
       if (
         loaded.projectId !== projectId ||
         loaded.documentFolder !== scope ||
-        loaded.promptFolder !== promptFolder.trim()
+        loaded.promptFolder !== scope
       )
         throw new Error(
           "Prompt source changed during loading. Load the selected source again.",
@@ -273,33 +273,9 @@ export function PromptEditor({
         verify application in your trace.
       </p>
       <p>
-        Project: <strong>{projectId || "(enter a project ID)"}</strong> ·
-        Document folder: <strong>{scope || "(choose a folder)"}</strong>
+        Project: <strong>{projectId || "(enter a project ID)"}</strong> · Prompt
+        source: <strong>{scope}</strong>
       </p>
-      {!folder && choices.length > 1 && (
-        <label>
-          Document folder for this prompt test{" "}
-          <select
-            aria-label="Document folder for this prompt test"
-            value={documentFolder}
-            disabled={disabled || busy}
-            onChange={(e) => {
-              chooseFolder({ documentFolder: e.target.value, promptFolder });
-            }}
-          >
-            {choices.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-        </label>
-      )}
-      {!scope && (
-        <p className="prompt-warning">
-          Add a folder column, or choose a document folder, before loading CMS.
-        </p>
-      )}
       {pendingFolder && (
         <div role="alert" className="prompt-folder-confirm">
           <p>
@@ -323,90 +299,99 @@ export function PromptEditor({
           </button>
         </div>
       )}
+      {mode === "cms" && (
+        <CmsAccess
+          projectId={projectId}
+          disabled={disabled || busy}
+          onAccessChange={setCanReadCms}
+        />
+      )}
+      <label htmlFor="cms-prompt-folder">Prompt source folder</label>
+      <select
+        id="cms-prompt-folder"
+        value={promptFolder}
+        disabled={disabled || busy}
+        onChange={(e) => {
+          chooseFolder(e.target.value);
+        }}
+        aria-describedby="cms-folder-help"
+      >
+        {sourceFolders.map((name) => (
+          <option key={name} value={name}>
+            {name}
+          </option>
+        ))}
+      </select>
+      <p id="cms-folder-help">
+        ROOT is the base for every folder. Revising ROOT tests all questions;
+        revising another folder tests only the CSV questions in that folder.
+        Folders come from this project’s CMS document list and the CSV. A listed
+        folder may use base configuration if it has no saved prompt version.
+      </p>
+      {canReadCms && (
+        <div className="prompt-actions">
+          <button
+            type="button"
+            className="button secondary small"
+            disabled={disabled || busy}
+            onClick={() => {
+              setFolderError("");
+              setFolderRefresh((value) => value + 1);
+            }}
+          >
+            Refresh CMS folders
+          </button>
+          {!extractedFolders.length && !folderError && (
+            <span role="status">Reading project folders…</span>
+          )}
+        </div>
+      )}
+      {folderError && (
+        <p role="alert" className="prompt-warning">
+          {folderError} You can retry or enter a folder manually.
+        </p>
+      )}
+      <details className="prompt-custom-folder">
+        <summary>Use a folder not listed</summary>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            const next = String(
+              new FormData(event.currentTarget).get("folder") || "",
+            ).trim();
+            if (next) chooseFolder(next);
+          }}
+        >
+          <label>
+            Other prompt source folder
+            <input
+              name="folder"
+              required
+              maxLength={500}
+              disabled={disabled || busy}
+            />
+          </label>
+          <button
+            type="submit"
+            className="button secondary small"
+            disabled={disabled || busy}
+          >
+            Select folder
+          </button>
+        </form>
+      </details>
+      <p
+        role="status"
+        className={coverage.covered ? undefined : "prompt-warning"}
+      >
+        {coverage.covered === 0
+          ? `No CSV questions are in ${scope}, so the revised prompt would not be used. Choose ROOT or a folder from the CSV.`
+          : scope === "ROOT"
+            ? `Applies to all ${coverage.total} question${coverage.total === 1 ? "" : "s"}. Every folder builds on ROOT: CMS appends a folder's prompt and documents after ROOT's.`
+            : `Applies to the ${coverage.covered} of ${coverage.total} question${coverage.total === 1 ? "" : "s"} in ${scope} (ROOT plus ${scope}). The other questions run with their normal CMS prompts.`}
+      </p>
       {mode === "cms" ? (
         <>
-          <CmsAccess
-            projectId={projectId}
-            disabled={disabled || busy}
-            onAccessChange={setCanReadCms}
-          />
-          <label htmlFor="cms-prompt-folder">Prompt source folder</label>
-          <select
-            id="cms-prompt-folder"
-            value={promptFolder}
-            disabled={disabled || busy}
-            onChange={(e) => {
-              chooseFolder({
-                documentFolder: scope,
-                promptFolder: e.target.value,
-              });
-            }}
-            aria-describedby="cms-folder-help"
-          >
-            {sourceFolders.map((name) => (
-              <option key={name} value={name}>
-                {name}
-              </option>
-            ))}
-          </select>
-          <p id="cms-folder-help">
-            Choose a folder from this project’s CMS document list, or ROOT. The
-            source folder can differ from the CSV document folder. A listed
-            folder may use base configuration if it has no saved prompt version.
-          </p>
-          {canReadCms && (
-            <div className="prompt-actions">
-              <button
-                type="button"
-                className="button secondary small"
-                disabled={disabled || busy}
-                onClick={() => {
-                  setFolderError("");
-                  setFolderRefresh((value) => value + 1);
-                }}
-              >
-                Refresh CMS folders
-              </button>
-              {!extractedFolders.length && !folderError && (
-                <span role="status">Reading project folders…</span>
-              )}
-            </div>
-          )}
-          {folderError && (
-            <p role="alert" className="prompt-warning">
-              {folderError} You can retry or enter a folder manually.
-            </p>
-          )}
-          <details className="prompt-custom-folder">
-            <summary>Use a folder not listed</summary>
-            <form
-              onSubmit={(event) => {
-                event.preventDefault();
-                const next = String(
-                  new FormData(event.currentTarget).get("folder") || "",
-                ).trim();
-                if (next)
-                  chooseFolder({ documentFolder: scope, promptFolder: next });
-              }}
-            >
-              <label>
-                Other prompt source folder
-                <input
-                  name="folder"
-                  required
-                  maxLength={500}
-                  disabled={disabled || busy}
-                />
-              </label>
-              <button
-                type="submit"
-                className="button secondary small"
-                disabled={disabled || busy}
-              >
-                Select folder
-              </button>
-            </form>
-          </details>
           {sourceNeedsLoad && (
             <p role="status">
               Folder changed. Load from CMS to view this source before running a
@@ -479,12 +464,6 @@ export function PromptEditor({
                 <p>
                   Version 0 denotes base configuration. It does not identify a
                   saved ROOT version. Runtime matching remains unverified.
-                </p>
-              )}
-              {!snapshot.isBase && snapshot.promptFolder !== scope && (
-                <p className="prompt-warning">
-                  Prompt and document folders differ. Confirm this source is
-                  appropriate; runtime matching is unverified.
                 </p>
               )}
               <p role="status">
@@ -616,8 +595,8 @@ export function PromptEditor({
                 notify(baseline, draft, e.target.checked);
               }}
             />
-            I checked the project, document folder, prompt source and language
-            values for this test.
+            I checked the project, prompt source folder, the questions it
+            applies to and the language values for this test.
           </label>
           <p>
             {changes

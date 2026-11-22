@@ -60,11 +60,7 @@ function campaignFor(
 ) {
   let config: ReturnType<typeof evaluatorConfig> = null;
   try {
-    if (
-      questions.some(needsJudge) ||
-      dimensionSelection ||
-      reuseDimensions
-    )
+    if (questions.some(needsJudge) || dimensionSelection || reuseDimensions)
       config = evaluatorConfig();
   } catch {
     /* Search remains usable; grading reports missing/invalid configuration. */
@@ -170,6 +166,10 @@ export async function createRun(
         ? {}
         : { promptOverrides: body.promptOverrides }),
     });
+  // Manual overrides apply to one document folder; a CMS selection uses its snapshot's folder below.
+  if (body.promptOverrides && !body.promptSelection)
+    config.promptScopeFolder =
+      body.promptDocumentFolder ?? body.questions[0].folder;
   if (isVercel() && config.timeoutMs > 180000)
     throw new ConflictError(
       "Hosted Doc Search timeout must not exceed 180000 ms.",
@@ -191,9 +191,10 @@ export async function createRun(
     ...(body.promptOverrides === undefined
       ? {}
       : { promptOverrides: body.promptOverrides }),
-    ...(body.dimensions === undefined
+    ...(body.promptDocumentFolder === undefined
       ? {}
-      : { dimensions: body.dimensions }),
+      : { promptDocumentFolder: body.promptDocumentFolder }),
+    ...(body.dimensions === undefined ? {} : { dimensions: body.dimensions }),
     ...(body.promptSelection
       ? {
           promptSelection: body.promptSelection,
@@ -233,6 +234,13 @@ export async function createRun(
       return prior.id;
     }
     snapshot = await getPromptSnapshot(body.promptSelection.snapshotId);
+    if (
+      body.promptDocumentFolder !== undefined &&
+      body.promptDocumentFolder !== snapshot.documentFolder
+    )
+      throw new ConflictError(
+        "The prompt test's document folder does not match the loaded prompt. Load it again.",
+      );
     assertSnapshotScope(snapshot, config.projectId, [
       ...new Set(body.questions.map((q) => q.folder)),
     ]);
@@ -258,6 +266,7 @@ export async function createRun(
         409,
         "CMS_BASELINE_CHANGED",
       );
+    config.promptScopeFolder = snapshot.documentFolder;
     config.promptProvenance = {
       snapshot,
       checkedAt: check.checkedAt,
@@ -464,7 +473,9 @@ export async function regradeRun(
 }
 
 /** Persist a blind preference comparison; the bounded history evicts the oldest. */
-export async function savePreferenceComparison(comparison: PreferenceComparison) {
+export async function savePreferenceComparison(
+  comparison: PreferenceComparison,
+) {
   const parsed = preferenceComparisonSchema.parse(comparison);
   return transaction((s) => {
     const list = s.preferenceComparisons ?? [];

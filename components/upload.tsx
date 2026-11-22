@@ -27,6 +27,7 @@ import type {
 } from "@/lib/schema";
 import { CriteriaEditor } from "./criteria-editor";
 import type { PromptSelection } from "@/lib/prompt-schema";
+import { promptCoversFolder } from "@/lib/schema";
 import { PromptEditor } from "./prompt-editor";
 import { DimensionEditor } from "./dimension-editor";
 import type { DimensionSelectionInput } from "@/lib/dimension-contract";
@@ -184,17 +185,17 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
       if (input.current) input.current.value = "";
     }
   }
-  // Prompt tests apply to one document folder; the server rejects mixed-folder
-  // prompt runs, so only that folder's questions are sent.
-  const allQuestions = criteriaQuestions ?? review?.questions ?? [];
+  // Every question runs. A ROOT prompt test covers all of them (every folder
+  // builds on ROOT); another source folder covers only its own questions, and
+  // the rest use their normal CMS prompts.
+  const batchQuestions = criteriaQuestions ?? review?.questions ?? [];
   const promptActive = Boolean(promptOverrides || promptSelection);
-  const batchQuestions =
-    promptActive && promptFolder
-      ? allQuestions.filter((q) => q.folder === promptFolder)
-      : allQuestions;
-  const excludedCount = allQuestions.length - batchQuestions.length;
+  const promptQuestions = promptActive
+    ? batchQuestions.filter((q) => promptCoversFolder(promptFolder, q.folder))
+    : batchQuestions;
+  const testQuestion = promptQuestions[0];
   async function testFirst() {
-    if (!batchQuestions.length || testing) return;
+    if (!testQuestion || testing) return;
     setTesting(true);
     setTest(null);
     setTestError("");
@@ -203,10 +204,11 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-          question: batchQuestions[0],
+          question: testQuestion,
           projectId: projectId.trim(),
           promptOverrides,
           promptSelection,
+          promptDocumentFolder: promptActive ? promptFolder : undefined,
           idempotencyKey: crypto.randomUUID(),
         }),
       });
@@ -231,6 +233,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
           projectId: projectId.trim(),
           promptOverrides,
           promptSelection,
+          promptDocumentFolder: promptActive ? promptFolder : undefined,
           dimensions: dimensionSelection,
           idempotencyKey: submissionKey.current,
         }),
@@ -245,6 +248,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
   const blocked =
     !review ||
     !batchQuestions.length ||
+    (promptActive && !promptQuestions.length) ||
     promptBlocked ||
     criteriaBlocked ||
     dimensionBlocked ||
@@ -378,7 +382,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
               },
               {
                 name: "folder",
-                description: "Defaults to Codex_Benchmark_tool.",
+                description: "Defaults to ROOT.",
               },
               {
                 name: "expected_answer",
@@ -612,12 +616,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
             <PromptEditor
               key={promptEditorKey}
               projectId={projectId.trim()}
-              folder={
-                Object.keys(review.folders).length === 1
-                  ? Object.keys(review.folders)[0]
-                  : null
-              }
-              folders={Object.keys(review.folders)}
+              folderCounts={review.folders}
               disabled={testing || starting}
               onChange={(overrides, invalid, selection, documentFolder) => {
                 setPromptOverrides(overrides);
@@ -630,15 +629,34 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                 setTestError("");
               }}
             />
-            {promptActive && promptFolder && excludedCount > 0 && (
-              <div className="alert info" role="status">
-                Prompt testing applies to one document folder. The test and
-                batch will run the {batchQuestions.length} question
-                {batchQuestions.length === 1 ? "" : "s"} in{" "}
-                <strong>{promptFolder}</strong> and leave out {excludedCount}{" "}
-                from other folders. Clear the prompt test to run every question.
-              </div>
-            )}
+            {promptActive &&
+              promptFolder &&
+              promptQuestions.length < batchQuestions.length && (
+                <div
+                  className={
+                    promptQuestions.length ? "alert info" : "alert warning"
+                  }
+                  role="status"
+                >
+                  {promptQuestions.length ? (
+                    <>
+                      The revised prompt applies to the {promptQuestions.length}{" "}
+                      question
+                      {promptQuestions.length === 1 ? "" : "s"} in{" "}
+                      <strong>{promptFolder}</strong>. The other{" "}
+                      {batchQuestions.length - promptQuestions.length} run with
+                      their normal CMS prompts. The first-query test uses the
+                      first question in <strong>{promptFolder}</strong>.
+                    </>
+                  ) : (
+                    <>
+                      No questions in this CSV are in{" "}
+                      <strong>{promptFolder}</strong>, so the revised prompt
+                      would not be used. Choose ROOT or a folder from the CSV.
+                    </>
+                  )}
+                </div>
+              )}
             <p className="muted">
               Try the synthetic{" "}
               <a href="/requirements-example.csv" download>
