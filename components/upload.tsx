@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
+import { PageHeading } from "./page-heading";
 import { startPolling } from "../lib/polling";
 import {
   UploadCloud,
@@ -275,11 +276,11 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
   );
   return (
     <>
-      <div className="page-heading">
-        <div className="eyebrow">BUILD CONFIDENCE IN EVERY ANSWER</div>
-        <h1>Benchmark your Doc Search</h1>
-        <p>Turn your test questions into a clear picture of answer quality.</p>
-      </div>
+      <PageHeading
+        eyebrow="BUILD CONFIDENCE IN EVERY ANSWER"
+        title="A clearer picture of answer quality."
+        description="Upload your questions, run a benchmark, and discover where answers can improve."
+      />
       <ErrorBox message={!review ? error : ""} />
       {!review && activeNotice}
       <div className="upload-grid">

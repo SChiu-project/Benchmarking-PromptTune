@@ -1,6 +1,7 @@
 "use client";
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { PageHeading } from "./page-heading";
 import { startPolling } from "../lib/polling";
 import { useRouter } from "next/navigation";
 import { Plus, Layers3, Activity, CheckCircle2, Target } from "lucide-react";
@@ -65,17 +66,16 @@ export function RunsScreen() {
   }
   return (
     <>
-      <div className="page-heading heading-action">
-        <div>
-          <div className="eyebrow">YOUR BENCHMARK HISTORY</div>
-          <h1>Runs</h1>
-          <p>Track execution, answer quality, and evaluation progress.</p>
-        </div>
-        <Link href="/" className="button primary">
-          <Plus size={17} />
-          New benchmark
-        </Link>
-      </div>
+      <PageHeading
+        eyebrow="YOUR BENCHMARK HISTORY"
+        title="Benchmark runs"
+        description="Follow execution, measure quality, and find what needs attention."
+        action={
+          <Link href="/" className="button primary">
+            <Plus size={17} /> New benchmark
+          </Link>
+        }
+      />
       <ErrorBox message={error} />
       <div className="metric-grid">
         {[
@@ -126,50 +126,35 @@ export function RunsScreen() {
             </Link>
           </div>
         ) : (
-          <div className="table-wrap">
+          <div
+            className="table-wrap"
+            role="region"
+            aria-label="Benchmark runs"
+            tabIndex={0}
+          >
             <table className="runs-table">
               <thead>
                 <tr>
-                  <th>Run / Created</th>
-                  <th>Status</th>
-                  <th>Progress</th>
-                  <th>
-                    Doc Search<small>success / failed / interrupted</small>
-                  </th>
-                  <th>
-                    Evaluation<small>complete / failed / skipped</small>
-                  </th>
-                  <th>Avg. latency</th>
-                  <th>Mean score / decisions</th>
+                  <th scope="col">Run / created</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Progress</th>
+                  <th scope="col">Pass rate</th>
+                  <th scope="col">Coverage</th>
+                  <th scope="col">Avg. latency</th>
+                  <th scope="col">Evaluation details</th>
                 </tr>
               </thead>
               <tbody>
                 {runs.map((r) => (
-                  <tr
-                    key={r.id}
-                    className="clickable"
-                    onClick={() => router.push(`/records?run=${r.id}`)}
-                  >
+                  <tr key={r.id}>
                     <td>
                       <Link
                         className="mono run-link"
                         href={`/records?run=${r.id}`}
                       >
-                        {r.id.slice(0, 8)} <span>↗</span>
+                        {r.id.slice(0, 8)} <span aria-hidden="true">↗</span>
                       </Link>
                       <small>{date(r.createdAt)}</small>
-                      <button
-                        className="button secondary small"
-                        disabled={runs.some((r) => r.status === "active")}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setRegradeSelection(undefined);
-                          setRegradeBlocked(false);
-                          setRegradeId(r.id);
-                        }}
-                      >
-                        Regrade saved answers
-                      </button>
                     </td>
                     <td>
                       <Badge value={r.status} />
@@ -184,59 +169,125 @@ export function RunsScreen() {
                         value={r.completed}
                         aria-label={`Run ${r.id} execution progress`}
                       />
+                      <small>responses</small>
+                      {r.searchFailed > 0 && (
+                        <small className="error-text">
+                          {r.searchFailed} search failures
+                        </small>
+                      )}
+                      {r.interrupted > 0 && (
+                        <small className="evaluation-caution">
+                          {r.interrupted} interrupted
+                        </small>
+                      )}
                     </td>
                     <td>
-                      <span className="success-text">{r.searchSucceeded}</span>{" "}
-                      /{" "}
-                      <span className={r.searchFailed ? "error-text" : ""}>
-                        {r.searchFailed}
-                      </span>{" "}
-                      / {r.interrupted}
+                      <strong className="score">{percent(r.passRate)}</strong>
+                      <small>
+                        {r.passed} pass · {r.failed} fail
+                      </small>
+                      <small>
+                        {r.review} review · {r.unassessable} unassessable
+                      </small>
+                      {r.mixedEvaluationVersions && (
+                        <small className="evaluation-caution">
+                          Mixed policies · rate suppressed
+                        </small>
+                      )}
                     </td>
                     <td>
-                      {r.evaluated} /{" "}
-                      <span className={r.evaluationFailed ? "error-text" : ""}>
-                        {r.evaluationFailed}
-                      </span>{" "}
-                      / {r.skipped}
+                      <strong className="coverage-value">
+                        {percent(r.evaluationCoverage)}
+                      </strong>
+                      <small>Requirement coverage</small>
+                      {r.criticalFailures > 0 && (
+                        <small className="error-text">
+                          {r.criticalFailures} critical failures
+                        </small>
+                      )}
+                      {r.evaluationFailed > 0 && (
+                        <small className="error-text">
+                          {r.evaluationFailed} evaluation failures
+                        </small>
+                      )}
                     </td>
                     <td>{latency(r.averageLatency)}</td>
                     <td>
-                      <strong className="score">
-                        {percent(r.averageScore)}
-                      </strong>
-                      <small>
-                        {r.scoredCount} scored
-                        {r.legacyScored ? ` · ${r.legacyScored} legacy` : ""}
-                      </small>
-                      <small>
-                        {r.passed} pass / {r.failed} fail / {r.review} review
-                      </small>
-                      <small>
-                        {r.criticalFailures} critical failures ·{" "}
-                        {r.unassessable} unassessable
-                      </small>
-                      <small>
-                        Pass rate {percent(r.passRate)} · coverage{" "}
-                        {percent(r.evaluationCoverage)}
-                      </small>
-                      <small>
-                        Operational success {percent(r.operationalSuccessRate)}
-                      </small>
-                      {r.mixedEvaluationVersions && (
-                        <small>
-                          Mixed evaluator versions; mean and pass rate
-                          suppressed
-                        </small>
-                      )}
-                      {r.dimensions && (
-                        <small>
-                          Dimensions: {r.dimensions.overall.passed} pass /{" "}
-                          {r.dimensions.overall.failed} fail ·{" "}
-                          {percent(r.dimensions.overall.passRate)}
-                          {r.dimensions.mixed ? " (mixed)" : ""}
-                        </small>
-                      )}
+                      <details className="run-breakdown">
+                        <summary>
+                          View breakdown
+                          <span className="sr-only">
+                            {" "}
+                            for run {r.id.slice(0, 8)}
+                          </span>
+                        </summary>
+                        <dl>
+                          <div>
+                            <dt>Mean score</dt>
+                            <dd>
+                              {percent(r.averageScore)} · {r.scoredCount} scored
+                              {r.legacyScored
+                                ? ` · ${r.legacyScored} legacy`
+                                : ""}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Doc Search</dt>
+                            <dd>
+                              {r.searchSucceeded} successful · {r.searchFailed}{" "}
+                              failed · {r.interrupted} interrupted
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Evaluation</dt>
+                            <dd>
+                              {r.evaluated} complete · {r.evaluationFailed}{" "}
+                              failed · {r.skipped} skipped
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Critical failures / unassessable</dt>
+                            <dd>
+                              {r.criticalFailures} / {r.unassessable}
+                            </dd>
+                          </div>
+                          <div>
+                            <dt>Operational success</dt>
+                            <dd>{percent(r.operationalSuccessRate)}</dd>
+                          </div>
+                          {r.mixedEvaluationVersions && (
+                            <div>
+                              <dt>Policy compatibility</dt>
+                              <dd>
+                                Mixed evaluator versions; mean and pass rate
+                                suppressed.
+                              </dd>
+                            </div>
+                          )}
+                          {r.dimensions && (
+                            <div>
+                              <dt>Dimensions</dt>
+                              <dd>
+                                {r.dimensions.overall.passed} pass ·{" "}
+                                {r.dimensions.overall.failed} fail ·{" "}
+                                {percent(r.dimensions.overall.passRate)}
+                                {r.dimensions.mixed ? " (mixed)" : ""}
+                              </dd>
+                            </div>
+                          )}
+                        </dl>
+                        <button
+                          className="button secondary small"
+                          disabled={runs.some((r) => r.status === "active")}
+                          onClick={() => {
+                            setRegradeSelection(undefined);
+                            setRegradeBlocked(false);
+                            setRegradeId(r.id);
+                          }}
+                        >
+                          Regrade saved answers
+                        </button>
+                      </details>
                     </td>
                   </tr>
                 ))}
@@ -264,8 +315,8 @@ export function RunsScreen() {
             <ErrorBox message={error} />
             <p className="muted">
               By default the run&apos;s frozen evaluation settings are reused.
-              Enable dimensions below to grade with a new dimension selection
-              or edited prompts; that creates a new campaign and keeps prior
+              Enable dimensions below to grade with a new dimension selection or
+              edited prompts; that creates a new campaign and keeps prior
               results.
             </p>
             <DimensionEditor

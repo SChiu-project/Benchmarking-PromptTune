@@ -19,8 +19,11 @@ export function Shell({
   const path = usePathname();
   return (
     <div className="workspace">
+      <a className="skip-link" href="#main-content">
+        Skip to content
+      </a>
       <aside className="sidebar">
-        <Link className="brand" href="/">
+        <Link className="brand" href="/" aria-label="Doc Search Benchmark home">
           <span className="brand-icon">
             <ScanLine size={21} />
           </span>
@@ -31,13 +34,14 @@ export function Shell({
         <div className="workspace-label">WORKSPACE</div>
         <nav aria-label="Main navigation">
           {[
-            { href: "/", label: "Upload", icon: ArrowUpFromLine },
+            { href: "/", label: "New benchmark", icon: ArrowUpFromLine },
             { href: "/runs", label: "Runs", icon: Layers3 },
             { href: "/records", label: "Records", icon: Rows3 },
           ].map((n) => (
             <Link
               key={n.href}
               href={n.href}
+              aria-label={n.label}
               className={path === n.href ? "nav-item active" : "nav-item"}
               aria-current={path === n.href ? "page" : undefined}
             >
@@ -83,14 +87,16 @@ export function Shell({
                 ? "Runs"
                 : path === "/records"
                   ? "Records"
-                  : "Upload"}
+                  : "New benchmark"}
             </strong>
           </div>
           <span className="environment">
             <i /> {hosted ? "Hosted environment" : "Local environment"}
           </span>
         </header>
-        <main id="main-content">{children}</main>
+        <main id="main-content" tabIndex={-1}>
+          {children}
+        </main>
         <footer className="main-footer">
           DOC SEARCH BENCHMARK<span>Built for better answers.</span>
         </footer>

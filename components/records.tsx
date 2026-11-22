@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
+import { PageHeading } from "./page-heading";
 import { startPolling } from "../lib/polling";
 import {
   Search,
@@ -166,17 +167,16 @@ export function RecordsScreen() {
   }
   return (
     <>
-      <div className="page-heading heading-action">
-        <div>
-          <div className="eyebrow">EVERY ANSWER, IN CONTEXT</div>
-          <h1>Records</h1>
-          <p>Inspect responses, trace their sources, and see what’s missing.</p>
-        </div>
-        <Link className="button secondary" href="/runs">
-          <ArrowLeft size={16} />
-          All runs
-        </Link>
-      </div>
+      <PageHeading
+        eyebrow="EVERY ANSWER, IN CONTEXT"
+        title="Answer records"
+        description="Inspect responses, trace their sources, and see what’s missing."
+        action={
+          <Link className="button secondary" href="/runs">
+            <ArrowLeft size={16} /> All runs
+          </Link>
+        }
+      />
       <ErrorBox message={error} />
       {run?.dispatchError && (
         <div className="alert warning">
@@ -478,14 +478,18 @@ export function RecordsScreen() {
                               <p>{r.evaluation.assessment}</p>
                               <details onClick={(e) => e.stopPropagation()}>
                                 <summary>Score breakdown</summary>
-                                <RequirementEvidence evaluation={r.evaluation} />
+                                <RequirementEvidence
+                                  evaluation={r.evaluation}
+                                />
                                 {!r.evaluation.requirements && (
                                   <dl>
                                     {dimensionNames.map((dimension) => {
                                       const criterion =
                                         r.evaluation!.dimensions[dimension];
                                       const weight =
-                                        r.evaluation!.applicableWeights[dimension];
+                                        r.evaluation!.applicableWeights[
+                                          dimension
+                                        ];
                                       return (
                                         <div key={dimension}>
                                           <dt>
@@ -512,8 +516,9 @@ export function RecordsScreen() {
                           {r.dimensionSuite && (
                             <details onClick={(e) => e.stopPropagation()}>
                               <summary>
-                                Dimension results ({r.dimensionSuite.counts.passed}
-                                /{r.dimensionSuite.rows.length} pass)
+                                Dimension results (
+                                {r.dimensionSuite.counts.passed}/
+                                {r.dimensionSuite.rows.length} pass)
                               </summary>
                               <DimensionEvidence suite={r.dimensionSuite} />
                             </details>
