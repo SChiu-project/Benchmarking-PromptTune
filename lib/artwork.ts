@@ -1,43 +1,45 @@
-export const artworks = [
-  {
-    id: "monet-water-lilies",
-    artist: "Claude Monet",
-    title: "Water Lilies",
-    year: "1906",
-    image: "/art/monet-water-lilies.jpg",
-    source: "https://artsandculture.google.com/asset/XwEbNDsEYukiWQ",
-  },
-  {
-    id: "monet-japanese-footbridge",
-    artist: "Claude Monet",
-    title: "The Japanese Footbridge",
-    year: "1899",
-    image: "/art/monet-japanese-footbridge.jpg",
-    source: "https://artsandculture.google.com/asset/RgG90GYz4QkZ4A",
-  },
-  {
-    id: "caillebotte-paris-rainy-day",
-    artist: "Gustave Caillebotte",
-    title: "Paris Street; Rainy Day",
-    year: "1877",
-    image: "/art/caillebotte-paris-rainy-day.jpg",
-    source: "https://artsandculture.google.com/asset/5wEUCOlEf-EaVQ",
-  },
-  {
-    id: "pissarro-boulevard-montmartre",
-    artist: "Camille Pissarro",
-    title: "The Boulevard Montmartre on a Winter Morning",
-    year: "1897",
-    image: "/art/pissarro-boulevard-montmartre.jpg",
-    source: "https://artsandculture.google.com/asset/4wGJB3rAyAmk2w",
-  },
-] as const;
+import catalog from "./artwork-catalog.json";
 
-export type Artwork = (typeof artworks)[number];
+// A URL catalogue of public-domain Impressionist and Post-Impressionist works
+// scanned by the Google Art Project and hosted on Wikimedia Commons. Rebuild it
+// with `node scripts/build-art-catalog.mjs`; see public/art/README.md.
+export type Artwork = {
+  id: string;
+  artist: string;
+  title: string;
+  year: string;
+  /** Remote Wikimedia Commons thumbnail, or a local path for the fallback. */
+  image: string;
+  /** Google Arts & Culture reference page. */
+  source: string;
+  commons?: string;
+  license?: string;
+  collection?: string;
+};
+
+export const artworks: readonly Artwork[] = catalog;
+
+// The only locally stored painting, shown when a remote image cannot load
+// (offline use, blocked hosts or a removed Commons file).
+export const fallbackArtwork: Artwork = {
+  id: "monet-water-lilies",
+  artist: "Claude Monet",
+  title: "Water Lilies",
+  year: "1906",
+  image: "/art/monet-water-lilies.jpg",
+  source: "https://artsandculture.google.com/asset/XwEbNDsEYukiWQ",
+  commons:
+    "https://commons.wikimedia.org/wiki/File:Claude_Monet_-_Water_Lilies_-_1906,_Ryerson.jpg",
+  license: "Public domain",
+  collection: "The Art Institute of Chicago",
+};
+
 type ShuffleState = { remaining: string[]; last: string | null };
 type ArtStorage = Pick<Storage, "getItem" | "setItem">;
-export const artworkStorageKey = "benchmark-artwork-shuffle-v1";
+export const artworkStorageKey = "benchmark-artwork-shuffle-v2";
 const ids: string[] = artworks.map((artwork) => artwork.id);
+const known = new Set(ids);
+const byId = new Map(artworks.map((artwork) => [artwork.id, artwork]));
 
 function readState(value: string | null): ShuffleState | null {
   if (!value) return null;
@@ -47,9 +49,9 @@ function readState(value: string | null): ShuffleState | null {
     const { remaining, last } = state as Partial<ShuffleState>;
     if (
       !Array.isArray(remaining) ||
-      !remaining.every((id) => typeof id === "string" && ids.includes(id)) ||
+      !remaining.every((id) => typeof id === "string" && known.has(id)) ||
       new Set(remaining).size !== remaining.length ||
-      !(last === null || (typeof last === "string" && ids.includes(last))) ||
+      !(last === null || (typeof last === "string" && known.has(last))) ||
       (last !== null && remaining.includes(last))
     )
       return null;
@@ -89,6 +91,6 @@ export function createArtworkShuffler(random = Math.random) {
     } catch {
       /* The in-memory bag still avoids repeats during navigation. */
     }
-    return artworks.find((artwork) => artwork.id === id)!;
+    return byId.get(id)!;
   };
 }

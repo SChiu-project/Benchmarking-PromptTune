@@ -4,6 +4,7 @@ import {
   artworks,
   artworkStorageKey,
   createArtworkShuffler,
+  fallbackArtwork,
 } from "../lib/artwork";
 
 function session() {
@@ -80,14 +81,36 @@ it("keeps shuffling when reading or writing session storage is blocked", () => {
   expect(new Set(visits).size).toBe(artworks.length);
 });
 
-it("ships a real local JPEG and Google Arts & Culture reference for every entry", () => {
+it("catalogues at least 100 attributed public-domain works", () => {
+  expect(artworks.length).toBeGreaterThanOrEqual(100);
+  expect(new Set(artworks.map((artwork) => artwork.id)).size).toBe(
+    artworks.length,
+  );
+  expect(new Set(artworks.map((artwork) => artwork.source)).size).toBe(
+    artworks.length,
+  );
   for (const artwork of artworks) {
-    const bytes = readFileSync(
-      new URL(`../public${artwork.image}`, import.meta.url),
+    const image = new URL(artwork.image);
+    expect(image.protocol).toBe("https:");
+    expect(image.hostname).toMatch(/^(thumb|upload)\.wikimedia\.org$/);
+    expect(image.pathname).toMatch(
+      /^\/wikipedia\/commons\/thumb\/.+\/1280px-.+\.jpe?g$/i,
     );
-    expect([...bytes.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
     expect(new URL(artwork.source).hostname).toBe("artsandculture.google.com");
+    expect(new URL(artwork.commons!).hostname).toBe("commons.wikimedia.org");
+    expect(artwork.license).toMatch(/public domain|cc0/i);
     expect(artwork.title).toBeTruthy();
     expect(artwork.artist).toBeTruthy();
+    expect(artwork.year).toMatch(/\d{4}/);
   }
+});
+
+it("ships a real local JPEG for the offline fallback", () => {
+  const bytes = readFileSync(
+    new URL(`../public${fallbackArtwork.image}`, import.meta.url),
+  );
+  expect([...bytes.subarray(0, 3)]).toEqual([0xff, 0xd8, 0xff]);
+  expect(new URL(fallbackArtwork.source).hostname).toBe(
+    "artsandculture.google.com",
+  );
 });

@@ -240,16 +240,9 @@ The benchmark setup currently uses a substantial review dialog. A dedicated mult
 
 ### Collection and attribution
 
-The current collection consists of four public-domain works:
+The collection is a URL catalogue of 155 public-domain Impressionist and Post-Impressionist works (`lib/artwork-catalog.json`, W-79), built from the Google Art Project scans on Wikimedia Commons by `scripts/build-art-catalog.mjs`. Only one image is stored locally, as the offline fallback.
 
-| Artist              | Work                                         | Year |
-| ------------------- | -------------------------------------------- | ---- |
-| Claude Monet        | Water Lilies                                 | 1906 |
-| Claude Monet        | The Japanese Footbridge                      | 1899 |
-| Gustave Caillebotte | Paris Street; Rainy Day                      | 1877 |
-| Camille Pissarro    | The Boulevard Montmartre on a Winter Morning | 1897 |
-
-[public/art/README.md](public/art/README.md) records the image sources, rights, and Google Arts & Culture references. Images are local JPEGs with a maximum edge of 1200px. Google Arts & Culture is a discovery and reference destination, not a live image feed. A new work needs its own verified reuse rights; its appearance on Google does not establish permission to copy it.
+[public/art/README.md](public/art/README.md) records the image sources, rights, and Google Arts & Culture references. Each entry stores a 1280px Wikimedia Commons thumbnail URL, its Google Arts & Culture page, its Commons file page and licence, and the holding museum. Browsers load the images from Wikimedia; the app never calls a Google API. Google Arts & Culture is a discovery and reference destination, not a live image feed. A new work needs its own verified reuse rights; its appearance on Google does not establish permission to copy it.
 
 The caption displays artist, title, and year and opens the matching Google Arts & Culture reference in a new tab using `noopener noreferrer`. Its accessible name also announces the new tab. The painted region is a decorative CSS background rather than a content image with alt text. If a future app asks people to study the painting itself, use a proper image with meaningful alt text and access to the uncropped work.
 
@@ -260,17 +253,17 @@ The caption displays artist, title, and year and opens the matching Google Arts 
 1. The initial server and client render show a neutral art area, without a random server-selected painting.
 2. After mounting, a deferred effect selects the next work and preloads it with `Image`.
 3. After a successful load, the image and matching caption appear together.
-4. Each bag contains all four works once. The next bag cannot start with the last work of the previous bag.
-5. The remaining bag and last selection persist under `benchmark-artwork-shuffle-v1` in `sessionStorage`.
+4. Each bag contains every catalogued work once. The next bag cannot start with the last work of the previous bag.
+5. The remaining bag and last selection persist under `benchmark-artwork-shuffle-v2` in `sessionStorage`.
 6. Mounting or a pathname change selects another work. A persisted `pageshow` event also selects another work after a back/forward cache return.
 7. Polling re-renders and query-string filter changes do not themselves trigger selection. There is no timed rotation.
 8. Cleanup removes listeners and pending image callbacks. Deferring selection avoids consuming an extra work during React Strict Mode's discarded initial effect.
 
-With storage blocked, an in-memory bag still supports navigation, but no-repeat history cannot survive a full reload. New independent sessions have independent orders and can coincidentally start with the same work. Failed image loading falls back to the first catalog work, so error fallback can repeat a painting.
+With storage blocked, an in-memory bag still supports navigation, but no-repeat history cannot survive a full reload. New independent sessions have independent orders and can coincidentally start with the same work. Failed image loading (offline use, a blocked host or a removed Commons file) shows the local fallback, Monet's _Water Lilies_, with its own caption, so error fallback can repeat that painting.
 
 ### Adding another painting
 
-Add a rights-checked, sensibly compressed local image under `public/art/`. Add its stable ID, artist, title, year, local image path, and verified source link to `artworks`. Update the attribution README and bump the storage key so existing sessions start a fresh bag. Inspect the desktop and shallow mobile crops and run the artwork tests. Do not put a remote image URL into the catalog's local-image field.
+Add the artist to the list in `scripts/build-art-catalog.mjs`, or adjust its per-artist limit, then run `node scripts/build-art-catalog.mjs`. The script accepts only Google Art Project paintings in landscape format with a Google Arts & Culture asset ID and a public-domain or CC0 Commons licence, checks that each thumbnail and reference page responds, and fails below 100 works. Do not hand-edit `lib/artwork-catalog.json`. Bump `artworkStorageKey` so existing sessions start a fresh bag, inspect the desktop and shallow mobile crops of new works, and run the artwork tests. Only the offline fallback belongs in `public/art/`.
 
 ## Interaction and content rules
 
@@ -304,15 +297,17 @@ Reuse the honesty of these patterns in another product, but define that product'
 | [components/shell.tsx](components/shell.tsx)                   | Brand area, sidebar, topbar, footer, main landmark                             | Replace product-specific routes and labels; exact path matching currently sets active navigation |
 | [components/page-heading.tsx](components/page-heading.tsx)     | Shared heading API and painted header composition                              | Reuse the prop contract                                                                          |
 | [components/artwork-header.tsx](components/artwork-header.tsx) | Client selection lifecycle, preload, caption                                   | Depends on React and Next.js `usePathname`                                                       |
-| [lib/artwork.ts](lib/artwork.ts)                               | Catalog, shuffle, storage validation and fallback                              | Scope the storage key to the new app                                                             |
-| [public/art](public/art)                                       | Local images and attribution                                                   | Copy source documentation with the assets                                                        |
+| [lib/artwork.ts](lib/artwork.ts)                               | Catalog typing, shuffle, storage validation and offline fallback               | Scope the storage key to the new app                                                             |
+| [lib/artwork-catalog.json](lib/artwork-catalog.json)           | Generated URL catalogue of Google Art Project works                            | Regenerate rather than hand-edit                                                                 |
+| [scripts/build-art-catalog.mjs](scripts/build-art-catalog.mjs) | Builds and verifies the catalogue from Wikimedia Commons                       | Adjust the artist list for a different collection                                                |
+| [public/art](public/art)                                       | Offline fallback image and attribution                                         | Copy source documentation with the assets                                                        |
 | [components/common.tsx](components/common.tsx)                 | Badge, Modal, ErrorBox, CopyButton, display helpers                            | Also re-exports a benchmark API client; review before copying wholesale                          |
 | [components/upload.tsx](components/upload.tsx)                 | Upload, review, setup and recent runs                                          | Product workflow, not a generic brand component                                                  |
 | [components/runs.tsx](components/runs.tsx)                     | Metrics, run summaries and disclosures                                         | Reference for analytical hierarchy                                                               |
 | [components/records.tsx](components/records.tsx)               | Filters, response table and evidence details                                   | Reference for investigation workflows                                                            |
 | [components/cms-access.tsx](components/cms-access.tsx)         | CMS connection and approval-request UI                                         | Product-specific access flow                                                                     |
 | [app/cms/approve/page.tsx](app/cms/approve/page.tsx)           | Standalone supervisor approval route                                           | Shell intentionally omits workspace navigation on this route                                     |
-| [tests/artwork.test.ts](tests/artwork.test.ts)                 | Shuffle cycles, persistence, corrupt storage, blocked storage and local assets | Preserve tests when reusing the artwork system                                                   |
+| [tests/artwork.test.ts](tests/artwork.test.ts)                 | Shuffle cycles, persistence, storage failures, catalogue rights and fallback    | Preserve tests when reusing the artwork system                                                   |
 
 The current stack is Next.js 16.4.5 App Router, React 19.3.1, TypeScript, plain global CSS, and Lucide icons. The project uses pnpm and declares Node 24.x. There is no Tailwind or shared UI-framework dependency. Follow the installed Next.js documentation and project instructions when modifying framework behaviour.
 
@@ -321,7 +316,7 @@ The current stack is Next.js 16.4.5 App Router, React 19.3.1, TypeScript, plain 
 1. Define the new app's primary task, navigation, and key decision metrics. Keep the brand, but write product-specific labels and explanations.
 2. Establish the colour variables and typography above. Retain system fonts unless a shared brand decision changes them.
 3. Extract the shell, header, panels, controls, status badges, dialog and table patterns. Preserve responsive and accessibility rules with each pattern.
-4. Copy the artwork controller, catalog, images and attribution together. Use an app-specific storage key; replace `usePathname` with that framework's route lifecycle if needed.
+4. Copy the artwork controller, catalogue, build script, fallback image and attribution together. Use an app-specific storage key; replace `usePathname` with that framework's route lifecycle if needed.
 5. Replace the current shell's route map, path labels, workspace copy, metadata, and approval-route exception. Do not carry an unrelated CMS bypass into a different app.
 6. Keep application APIs and scoring logic separate from reusable presentation components. Configure `@/` imports or replace them with the new app's paths.
 7. Use semantic names such as `--color-action` in a future shared token package if useful, mapped to the exact values here. These names are proposed aliases, not variables already available in this app.
@@ -331,7 +326,7 @@ For a Next.js port, remember that `PageHeading` imports `ArtworkHeader`, which i
 
 ### Reusable implementation brief
 
-> Build this app using the branding in the Benchmark UI Design and Implementation Handbook. Use ivory `#f7f5ef`, near-white panels `#fffefa`, ink `#263449`, supporting text `#626e79`, and primary blue `#355f87`. Pair Georgia page titles with system sans-serif controls. Use the shared sidebar and topbar structure, 14px panels, 16px painted page headers, restrained borders, and Lucide stroke icons. Keep data and forms on opaque surfaces. Curate locally stored Impressionist artwork with source attribution, shuffling per visit rather than on a timer. Preserve labelled statuses, keyboard access, mobile layouts, and visible failure information. Adapt routes, labels and metrics to the new product. Use the handbook's acceptance checklist and document any deliberate departures.
+> Build this app using the branding in the Benchmark UI Design and Implementation Handbook. Use ivory `#f7f5ef`, near-white panels `#fffefa`, ink `#263449`, supporting text `#626e79`, and primary blue `#355f87`. Pair Georgia page titles with system sans-serif controls. Use the shared sidebar and topbar structure, 14px panels, 16px painted page headers, restrained borders, and Lucide stroke icons. Keep data and forms on opaque surfaces. Curate a catalogue of at least 100 public-domain Google Art Project Impressionist works with source attribution and a local offline fallback, shuffling per visit rather than on a timer. Preserve labelled statuses, keyboard access, mobile layouts, and visible failure information. Adapt routes, labels and metrics to the new product. Use the handbook's acceptance checklist and document any deliberate departures.
 
 ## Acceptance checklist
 

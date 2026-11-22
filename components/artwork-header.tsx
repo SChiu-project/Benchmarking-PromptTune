@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
-import { artworks, createArtworkShuffler, type Artwork } from "@/lib/artwork";
+import {
+  createArtworkShuffler,
+  fallbackArtwork,
+  type Artwork,
+} from "@/lib/artwork";
 
 const nextArtwork = createArtworkShuffler();
 
@@ -28,7 +32,7 @@ export function ArtworkHeader() {
         if (!disposed) setArtwork(selected);
       };
       image.onerror = () => {
-        if (!disposed) setArtwork(artworks[0]);
+        if (!disposed) setArtwork(fallbackArtwork);
       };
       image.src = selected.image;
     }
