@@ -291,3 +291,30 @@ it("keeps both current and historical criteria when a saved answer is regraded a
   expect(r.attempts[1].questionSnapshot?.criteria?.version).toBe("criteria-v2");
   expect(r.attempts[0].campaign?.id).not.toBe(r.attempts[1].campaign?.id);
 });
+it("does not inflate judge agreement with deterministic, unknown or N/A labels", async () => {
+  const q = question();
+  q.criteria!.requirements[0].check = {
+    type: "contains",
+    value: "Level 1",
+    caseSensitive: true,
+  };
+  q.criteria!.policy.checkAdditionalClaims = false;
+  const run = await saved(q);
+  await processCloudEvaluation(run.id, run.records[0].id, 0);
+  const completed = (await readState()).runs[0];
+  const labels = calibrationTemplate(completed);
+  const label = labels.cases[0];
+  label.reviewers = ["A", "B"];
+  label.adjudicatedBy = "Owner";
+  label.familyId = "family";
+  label.requirements[0].status = "met";
+  label.decision = "pass";
+  let report = calibrationReport(completed, labels);
+  expect(report.heldOut.requirementAgreement).toBe(1);
+  expect(report.heldOut.semanticRequirementAgreement).toBeNull();
+  expect(report.pilotTargetsMet).toBe(false);
+  label.requirements[0].status = "unknown";
+  report = calibrationReport(completed, labels);
+  expect(report.heldOut.requirementAgreement).toBeNull();
+  expect(report.heldOut.excludedUnknownOrNALabels).toBe(1);
+});

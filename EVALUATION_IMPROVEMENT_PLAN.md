@@ -1,6 +1,8 @@
 # Draft: measurable fulfillment and evidence-based evaluation explanations
 
-Date: 2026-11-15. Status: proposal for review; no application changes implemented.
+Date: 2026-11-15. Status: software implementation completed; human calibration and production adoption remain pending. See [EVALUATION_GUIDE.md](EVALUATION_GUIDE.md) for the implemented workflow.
+
+Implementation includes approved criteria import/review, deterministic requirement scoring, critical gates, evidence validation, immutable campaigns, local/hosted grading, saved-answer regrading, legacy compatibility, and calibration/comparison/stability reporting. Automated verification passed: typecheck, lint, 109 tests, production build, and workflow HTTP smoke tests with local JSON and PostgreSQL storage using local mock upstreams. Domain approval of real criteria, independent human labels, paid pilot judge runs and held-out accuracy validation have not been performed. The original proposal below is retained as the design record.
 
 Scope: the local `doc-search-benchmark` implementation. “Explanation” means the evaluator's justification for its grade. The chatbot's own explanation quality should become a task requirement only when the question calls for one. Findings below come from code and existing tests, not a new live benchmark or a production audit.
 
@@ -56,11 +58,11 @@ Question: “Where is the accessible toilet and how do I get there without stair
 
 Approved requirements:
 
-| ID | Requirement | Weight | Critical | Judgment |
-| --- | --- | --- | --- | --- |
-| R1 | Identify Level 1 | 2 | No | Met; exact response quote |
-| R2 | Identify location beside Lift A | 1 | No | Met; exact response quote |
-| R3 | Give the step-free route using Lift A from the concourse | 3 | Yes | Unmet; route instruction absent |
+| ID  | Requirement                                              | Weight | Critical | Judgment                        |
+| --- | -------------------------------------------------------- | ------ | -------- | ------------------------------- |
+| R1  | Identify Level 1                                         | 2      | No       | Met; exact response quote       |
+| R2  | Identify location beside Lift A                          | 1      | No       | Met; exact response quote       |
+| R3  | Give the step-free route using Lift A from the concourse | 3      | Yes      | Unmet; route instruction absent |
 
 Fulfillment is `100 × (2 + 1 + 0) / (2 + 1 + 3) = 50%`. Release decision: **fail**, because R3 is critical and unmet. No extra penalty is needed for the same omission.
 
@@ -142,13 +144,13 @@ Re-evaluate saved answers in a new campaign to compare rubric versions without r
 
 ### Delivery order and acceptance gates
 
-| Phase | Accountable owner | Deliverable | Exit criterion |
-| --- | --- | --- | --- |
-| P0: define | Domain owner + benchmark maintainer | Approved pilot criteria, labeled cases and provisional decision policy | Reviewers can apply the rules consistently; conflicts are resolved |
-| P1: measure | Benchmark maintainer | Versioned requirement schema, deterministic scorer and evidence validators | Critical omission, N/A, unknown bounds, contradiction and numeric-boundary cases behave as specified |
-| P2: integrate | Benchmark maintainer | Immutable evaluation bundles, both worker paths, campaign persistence and explanation UI | Local/hosted parity; old runs remain readable; regrading preserves history |
-| P3: validate | Domain reviewers | Held-out calibration report and paired baseline/candidate evaluation | Targets met or limitations explicitly block release gating |
-| P4: monitor, optional | Product/operations owner | Scoped production sampling and human review queue | A demonstrated monitoring need and verified event mapping justify integration |
+| Phase                 | Accountable owner                   | Deliverable                                                                              | Exit criterion                                                                                       |
+| --------------------- | ----------------------------------- | ---------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- |
+| P0: define            | Domain owner + benchmark maintainer | Approved pilot criteria, labeled cases and provisional decision policy                   | Reviewers can apply the rules consistently; conflicts are resolved                                   |
+| P1: measure           | Benchmark maintainer                | Versioned requirement schema, deterministic scorer and evidence validators               | Critical omission, N/A, unknown bounds, contradiction and numeric-boundary cases behave as specified |
+| P2: integrate         | Benchmark maintainer                | Immutable evaluation bundles, both worker paths, campaign persistence and explanation UI | Local/hosted parity; old runs remain readable; regrading preserves history                           |
+| P3: validate          | Domain reviewers                    | Held-out calibration report and paired baseline/candidate evaluation                     | Targets met or limitations explicitly block release gating                                           |
+| P4: monitor, optional | Product/operations owner            | Scoped production sampling and human review queue                                        | A demonstrated monitoring need and verified event mapping justify integration                        |
 
 Likely implementation touchpoints: `lib/schema.ts`, `lib/evaluator.ts`, `lib/engine.ts`, `lib/cloud-jobs.ts`, storage adapters, record-list projections, CSV/criteria import, and record/run screens. Preserve the existing stack and use its Zod validation and trace infrastructure. Relevant application-reference concepts are runtime validation and tracing; no new platform dependency is needed for P0–P3.
 

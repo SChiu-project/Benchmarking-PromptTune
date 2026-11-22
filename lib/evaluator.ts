@@ -109,7 +109,12 @@ export async function evaluate(
       "Content-Type": "application/json",
       Authorization: `Bearer ${c.key}`,
     },
-    signal: AbortSignal.timeout(snapshot?.timeoutMs ?? c.timeoutMs),
+    signal: AbortSignal.timeout(
+      Math.min(
+        isVercel() ? 180000 : 300000,
+        Math.max(snapshot?.timeoutMs ?? 0, c.timeoutMs),
+      ),
+    ),
     body: JSON.stringify({
       model: snapshot?.model ?? c.model,
       temperature: 0,

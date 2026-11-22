@@ -17,6 +17,9 @@
     "deploy:check": "node scripts/deployment-check.mjs",
     "data:import": "tsx scripts/import-local-data.ts",
     "cms:check": "tsx scripts/smoke-cms.ts",
+    "cms:import": "tsx scripts/import-cms-export.ts",
+    "cms:export": "tsx scripts/export-cms-format.ts",
+    "preference:compare": "tsx scripts/preference-compare.ts",
     "package:github": "python3 scripts/package-github.py"
   },
   "dependencies": {

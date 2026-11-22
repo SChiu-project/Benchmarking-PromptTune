@@ -14,6 +14,11 @@ import {
 import type { RecordData, RunSummary } from "@/lib/schema";
 import { CriteriaEditor } from "./criteria-editor";
 import { EvaluationScore, RequirementEvidence } from "./requirement-evaluation";
+import {
+  DimensionScore,
+  DimensionEvidence,
+  DimensionSummaryTable,
+} from "./dimension-evaluation";
 import type { Question } from "@/lib/schema";
 import { dimensionNames, weights } from "@/lib/schema";
 import {
@@ -245,6 +250,17 @@ export function RecordsScreen() {
           />
         </div>
       )}
+      {run?.dimensions && (
+        <section className="panel">
+          <div className="panel-title">
+            <h2>Dimension results</h2>
+            <span className="muted">
+              Draft rubric · {run.dimensionEvaluated} judged
+            </span>
+          </div>
+          <DimensionSummaryTable summary={run.dimensions} />
+        </section>
+      )}
       <div className="panel">
         <div className="records-toolbar">
           <div className="search-control">
@@ -439,47 +455,69 @@ export function RecordsScreen() {
                     <td>
                       <strong className="score">
                         {r.evaluationStatus === "succeeded" ? (
-                          <EvaluationScore evaluation={r.evaluation} />
+                          <>
+                            {r.evaluation && (
+                              <EvaluationScore evaluation={r.evaluation} />
+                            )}
+                            {r.dimensionSuite && (
+                              <DimensionScore suite={r.dimensionSuite} />
+                            )}
+                            {!r.evaluation && !r.dimensionSuite && "—"}
+                          </>
                         ) : (
                           "—"
                         )}
                       </strong>
                     </td>
                     <td className="score-explanation">
-                      {r.evaluationStatus === "succeeded" && r.evaluation ? (
+                      {r.evaluationStatus === "succeeded" &&
+                      (r.evaluation || r.dimensionSuite) ? (
                         <>
-                          <p>{r.evaluation.assessment}</p>
-                          <details onClick={(e) => e.stopPropagation()}>
-                            <summary>Score breakdown</summary>
-                            <RequirementEvidence evaluation={r.evaluation} />
-                            {!r.evaluation.requirements && (
-                              <dl>
-                                {dimensionNames.map((dimension) => {
-                                  const criterion =
-                                    r.evaluation!.dimensions[dimension];
-                                  const weight =
-                                    r.evaluation!.applicableWeights[dimension];
-                                  return (
-                                    <div key={dimension}>
-                                      <dt>
-                                        <span>{dimension}</span>
-                                        {criterion.score === null
-                                          ? " · Unassessable"
-                                          : ` · ${criterion.score}/100 · ${Math.round(weight * 10) / 10}% weight`}
-                                      </dt>
-                                      <dd>{criterion.explanation}</dd>
-                                    </div>
-                                  );
-                                })}
-                              </dl>
-                            )}
-                            {r.evaluation.limitations.length > 0 && (
-                              <p className="score-limitations">
-                                <strong>Limitations: </strong>
-                                {r.evaluation.limitations.join("; ")}
-                              </p>
-                            )}
-                          </details>
+                          {r.evaluation && (
+                            <>
+                              <p>{r.evaluation.assessment}</p>
+                              <details onClick={(e) => e.stopPropagation()}>
+                                <summary>Score breakdown</summary>
+                                <RequirementEvidence evaluation={r.evaluation} />
+                                {!r.evaluation.requirements && (
+                                  <dl>
+                                    {dimensionNames.map((dimension) => {
+                                      const criterion =
+                                        r.evaluation!.dimensions[dimension];
+                                      const weight =
+                                        r.evaluation!.applicableWeights[dimension];
+                                      return (
+                                        <div key={dimension}>
+                                          <dt>
+                                            <span>{dimension}</span>
+                                            {criterion.score === null
+                                              ? " · Unassessable"
+                                              : ` · ${criterion.score}/100 · ${Math.round(weight * 10) / 10}% weight`}
+                                          </dt>
+                                          <dd>{criterion.explanation}</dd>
+                                        </div>
+                                      );
+                                    })}
+                                  </dl>
+                                )}
+                                {r.evaluation.limitations.length > 0 && (
+                                  <p className="score-limitations">
+                                    <strong>Limitations: </strong>
+                                    {r.evaluation.limitations.join("; ")}
+                                  </p>
+                                )}
+                              </details>
+                            </>
+                          )}
+                          {r.dimensionSuite && (
+                            <details onClick={(e) => e.stopPropagation()}>
+                              <summary>
+                                Dimension results ({r.dimensionSuite.counts.passed}
+                                /{r.dimensionSuite.rows.length} pass)
+                              </summary>
+                              <DimensionEvidence suite={r.dimensionSuite} />
+                            </details>
+                          )}
                         </>
                       ) : (
                         <p className="muted">
@@ -587,7 +625,8 @@ export function RecordsScreen() {
                         retrying ||
                         criteriaBlocked ||
                         (!regradeQuestions?.[0].criteria &&
-                          !detail.question.criteria) ||
+                          !detail.question.criteria &&
+                          !detail.dimensionSuite) ||
                         detail.execution !== "succeeded" ||
                         ["pending", "running"].includes(detail.evaluationStatus)
                       }
@@ -701,6 +740,9 @@ export function RecordsScreen() {
                         </div>
                       )}
                     </>
+                  )}
+                  {detail.dimensionSuite && (
+                    <DimensionEvidence suite={detail.dimensionSuite} />
                   )}
                   {detail.attempts.length > 0 && (
                     <details>

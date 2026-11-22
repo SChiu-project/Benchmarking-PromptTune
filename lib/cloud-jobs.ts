@@ -1,5 +1,10 @@
 import { evidenceHash } from "./evaluation-snapshot";
 import { REQUIREMENT_RUBRIC, needsJudge } from "./evaluation-contract";
+import {
+  evaluateDimensionSuite,
+  DIMENSION_RUBRIC,
+  type DimensionSuiteResult,
+} from "./evaluation-dimensions";
 import { randomUUID } from "node:crypto";
 import { transaction, finishRuns } from "./store";
 import { search, SearchFailure } from "./doc-search";
@@ -20,6 +25,7 @@ type Services = {
   search: (q: Question, c: SearchConfig) => Promise<SearchResult>;
   evaluate: typeof evaluate;
   config: typeof evaluatorConfig;
+  evaluateDimensions?: typeof evaluateDimensionSuite;
 };
 const services: Services = { search, evaluate, config: evaluatorConfig };
 const eligible = (r: Run | undefined, generation: number) =>
@@ -134,27 +140,34 @@ export async function processCloudEvaluation(
     } catch {
       reason = "Invalid evaluator configuration.";
     }
+    const campaign = r.queuedCampaign ?? run!.campaign;
+    const dims = campaign?.dimensions;
     if (r.execution !== "succeeded" || !r.result)
       reason = "Doc Search did not produce a confirmed answer.";
-    else if ((r.queuedCampaign ?? run!.campaign) && !r.question.criteria)
+    else if (campaign && !r.question.criteria && !dims)
       reason =
         "Approved requirements are required. Import criteria before regrading.";
     else if (
-      (r.queuedCampaign ?? run!.campaign) &&
-      !(r.queuedCampaign ?? run!.campaign)!.evaluator &&
-      needsJudge(r.question)
+      campaign &&
+      !campaign.evaluator &&
+      needsJudge(r.question) &&
+      !dims
     )
       reason =
         "Evaluator was not configured when this campaign was created. Configure it and regrade.";
-    else if (!evaluationBasis(r.question))
+    else if (dims && !dims.judge)
+      reason =
+        "Evaluator was not configured when this campaign was created. Configure it and regrade.";
+    else if (!evaluationBasis(r.question) && !dims)
       reason = "No expected answer or evaluation comments supplied.";
-    else if (!config && needsJudge(r.question))
+    else if (!config && (needsJudge(r.question) || dims))
       reason =
         reason ||
         "Evaluator not configured. Set EVALUATOR_ENDPOINT, EVALUATOR_MODEL, and EVALUATOR_API_KEY.";
     if (
       !needsJudge(r.question) &&
       r.question.criteria &&
+      !dims &&
       r.execution === "succeeded" &&
       r.result
     )
@@ -182,8 +195,12 @@ export async function processCloudEvaluation(
         (r.queuedCampaign ?? run!.campaign)?.evaluator?.endpoint ??
         config?.endpoint ??
         "local:deterministic",
-      rubricVersion: r.question.criteria ? REQUIREMENT_RUBRIC : RUBRIC_VERSION,
-      campaign: r.queuedCampaign ?? run!.campaign,
+      rubricVersion: r.question.criteria
+        ? REQUIREMENT_RUBRIC
+        : dims
+          ? DIMENSION_RUBRIC
+          : RUBRIC_VERSION,
+      campaign,
       questionSnapshot: r.question,
       evidenceHash: evidenceHash(
         r.question,
@@ -198,21 +215,45 @@ export async function processCloudEvaluation(
       question: r.question,
       answer: r.result!.answer,
       sources: r.result!.sources,
-      snapshot: (r.queuedCampaign ?? run!.campaign)?.evaluator,
+      campaign,
       attemptId,
     } as const;
   });
   if (!job.question || typeof job.answer !== "string" || !job.attemptId)
     return job.done;
-  let result: Evaluation | undefined, error: unknown;
-  try {
-    result = await deps.evaluate(job.question, job.answer, {
-      sources: job.sources,
-      snapshot: job.snapshot,
-    });
-  } catch (e) {
-    error = e;
+  const dims = job.campaign?.dimensions;
+  const message = (e: unknown) =>
+    e instanceof Error ? e.message : "Evaluation failed.";
+  let result: Evaluation | undefined,
+    suite: DimensionSuiteResult | undefined,
+    reqError: unknown,
+    dimError: unknown;
+  if (evaluationBasis(job.question) || job.question.criteria) {
+    try {
+      result = await deps.evaluate(job.question, job.answer, {
+        sources: job.sources,
+        snapshot: job.campaign?.evaluator,
+      });
+    } catch (e) {
+      reqError = e;
+    }
   }
+  if (dims) {
+    try {
+      suite = await (deps.evaluateDimensions ?? evaluateDimensionSuite)(
+        job.question.query,
+        job.answer,
+        job.sources,
+        dims,
+        deps.config(),
+      );
+    } catch (e) {
+      dimError = e;
+    }
+  }
+  const legacySkipped =
+    !!result && result.score === null && !result.requirements;
+  const scored = (!!result && !legacySkipped) || !!suite;
   await transaction((s) => {
     const run = s.runs.find((r) => r.id === runId),
       r = run?.records.find((r) => r.id === id),
@@ -229,19 +270,43 @@ export async function processCloudEvaluation(
     if (result) {
       a.result = result;
       a.providerModel = result.providerModel;
-      a.status =
-        result.score === null && !result.requirements ? "skipped" : "succeeded";
-      r.evaluation = result;
-      r.evaluationStatus = a.status;
-      if (result.score === null && !result.requirements)
-        r.evaluationReason =
-          "No meaningful assessable grading basis; see limitations.";
-    } else {
+    }
+    if (suite) {
+      a.dimensionSuite = suite;
+      a.providerModel ??= suite.attempts.find(
+        (x) => x.providerModel,
+      )?.providerModel;
+    }
+    if (scored) {
+      a.status = "succeeded";
+      r.evaluationStatus = "succeeded";
+      if (result) r.evaluation = result;
+      if (suite) r.dimensionSuite = suite;
+      delete r.evaluationReason;
+      if (reqError && suite)
+        r.evaluationReason = `Requirement evaluation failed: ${message(reqError)}`;
+      if (dimError && result && !legacySkipped)
+        r.evaluationReason = `Dimension evaluation failed: ${message(dimError)}`;
+    } else if (legacySkipped && !dims) {
+      a.status = "skipped";
+      r.evaluationStatus = "skipped";
+      r.evaluationReason =
+        "No meaningful assessable grading basis; see limitations.";
+    } else if (reqError || dimError) {
       a.status = "failed";
       r.evaluationStatus = "failed";
       r.evaluationReason =
-        error instanceof Error ? error.message : "Evaluation failed.";
+        [
+          reqError && `Requirement evaluation: ${message(reqError)}`,
+          dimError && `Dimension evaluation: ${message(dimError)}`,
+        ]
+          .filter(Boolean)
+          .join(" ") || "Evaluation failed.";
       a.error = r.evaluationReason;
+    } else {
+      a.status = "skipped";
+      r.evaluationStatus = "skipped";
+      r.evaluationReason = "No grading basis for this record.";
     }
     finishRuns(s);
   });

@@ -12,6 +12,12 @@ import {
   promptSelectionSchema,
   promptProvenanceSchema,
 } from "./prompt-schema";
+import {
+  DIMENSION_NAMES,
+  dimensionSelectionSchema,
+  dimensionSuiteResultSchema,
+} from "./dimension-contract";
+import { preferenceComparisonSchema } from "./preference-contract";
 export {
   localizedPromptSchema,
   promptOverridesSchema,
@@ -130,6 +136,7 @@ export const attemptSchema = z.object({
   status: z.enum(["running", "succeeded", "failed", "skipped"]),
   error: z.string().optional(),
   result: evaluationSchema.optional(),
+  dimensionSuite: dimensionSuiteResultSchema.optional(),
 });
 export const recordSchema = z.object({
   id: z.uuid(),
@@ -147,6 +154,7 @@ export const recordSchema = z.object({
     .optional(),
   evaluationReason: z.string().optional(),
   evaluation: evaluationSchema.optional(),
+  dimensionSuite: dimensionSuiteResultSchema.optional(),
   attempts: z.array(attemptSchema),
   queuedCampaign: campaignSchema.optional(),
 });
@@ -180,6 +188,7 @@ export const stateSchema = z.object({
   version: z.literal(1),
   runs: z.array(runSchema),
   promptSnapshots: z.array(promptSnapshotSchema).max(20).optional(),
+  preferenceComparisons: z.array(preferenceComparisonSchema).max(20).optional(),
 });
 export type State = z.infer<typeof stateSchema>;
 export const createRunSchema = z
@@ -190,6 +199,7 @@ export const createRunSchema = z
     projectId: projectIdSchema.optional(),
     promptOverrides: promptOverridesSchema.optional(),
     promptSelection: promptSelectionSchema.optional(),
+    dimensions: dimensionSelectionSchema.optional(),
   })
   .strict()
   .refine(
@@ -202,6 +212,7 @@ export const createRunSchema = z
     },
   );
 export type CreateRun = z.infer<typeof createRunSchema>;
+export type CreateRunInput = z.input<typeof createRunSchema>;
 export function summarize(run: Run) {
   const rs = run.records,
     successful = rs.filter((r) => r.execution === "succeeded" && r.result),
@@ -234,6 +245,59 @@ export function summarize(run: Run) {
   ).length;
   const mean = (xs: number[]) =>
     xs.length ? xs.reduce((a, b) => a + b, 0) / xs.length : null;
+  const dimRecords = rs.filter((r) => r.dimensionSuite);
+  const dimSignatures = new Set(
+    dimRecords.map((r) =>
+      JSON.stringify({
+        config: r.attempts.at(-1)?.campaign?.dimensions?.dimensions.map(
+          (d) => [d.name, d.promptHash, d.thresholds],
+        ),
+        naPolicy: r.dimensionSuite!.naPolicy,
+      }),
+    ),
+  );
+  const dimensionMixed = dimSignatures.size > 1;
+  const perDimension = DIMENSION_NAMES.map((name) => {
+    const rows = dimRecords.flatMap((r) =>
+      r.dimensionSuite!.rows.filter((x) => x.name === name),
+    );
+    const passed = rows.filter((x) => x.status === "pass").length;
+    const failed = rows.filter((x) => x.status === "fail").length;
+    return {
+      name,
+      total: rows.length,
+      passed,
+      failed,
+      review: rows.filter((x) => x.status === "review").length,
+      notApplicable: rows.filter((x) => x.status === "not_applicable").length,
+      errors: rows.filter((x) => x.status === "error").length,
+      passRate:
+        !dimensionMixed && passed + failed
+          ? (100 * passed) / (passed + failed)
+          : null,
+    };
+  }).filter((d) => d.total > 0);
+  const dimPassed = dimRecords.filter(
+    (r) => r.dimensionSuite!.overallPassed === true,
+  ).length;
+  const dimFailed = dimRecords.filter(
+    (r) => r.dimensionSuite!.overallPassed === false,
+  ).length;
+  const dimensions = dimRecords.length
+    ? {
+        mixed: dimensionMixed,
+        perDimension,
+        overall: {
+          passed: dimPassed,
+          failed: dimFailed,
+          undecided: dimRecords.length - dimPassed - dimFailed,
+          passRate:
+            !dimensionMixed && dimPassed + dimFailed
+              ? (100 * dimPassed) / (dimPassed + dimFailed)
+              : null,
+        },
+      }
+    : null;
   return {
     id: run.id,
     kind: run.kind,
@@ -285,6 +349,8 @@ export function summarize(run: Run) {
       ? (100 * successful.length) / rs.length
       : null,
     legacyScored: scored.filter((r) => !r.evaluation!.requirements).length,
+    dimensionEvaluated: rs.filter((r) => r.dimensionSuite).length,
+    dimensions,
     unassessable: requirementRecords.filter(
       (r) => !r.evaluation!.requirements!.applicableWeight,
     ).length,

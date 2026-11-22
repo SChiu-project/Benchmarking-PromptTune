@@ -16,3 +16,4 @@ github-ready/
 *.pem
 *.key
 /.swc
+reports/

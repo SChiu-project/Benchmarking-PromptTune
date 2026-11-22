@@ -8,7 +8,7 @@ import {
   configSchema,
   type State,
   type Run,
-  type CreateRun,
+  type CreateRunInput,
   type Question,
 } from "./schema";
 import { databaseMode, workflowMode, isVercel } from "./runtime";
@@ -31,6 +31,18 @@ import {
   needsJudge,
   type Criteria,
 } from "./evaluation-contract";
+import type {
+  DimensionSelection,
+  DimensionCampaign,
+} from "./evaluation-dimensions";
+import {
+  dimensionSelectionSchema,
+  type DimensionSelectionInput,
+} from "./dimension-contract";
+import {
+  preferenceComparisonSchema,
+  type PreferenceComparison,
+} from "./preference-contract";
 export const dataDir = () =>
   process.env.DATA_DIR || path.join(process.cwd(), "data");
 export class ConflictError extends Error {}
@@ -41,14 +53,23 @@ function validateApprovedReferences(q: Question) {
     throw new ConflictError((e as Error).message);
   }
 }
-function campaignFor(questions: Question[]) {
+function campaignFor(
+  questions: Question[],
+  dimensionSelection?: DimensionSelection,
+  reuseDimensions?: DimensionCampaign,
+) {
   let config: ReturnType<typeof evaluatorConfig> = null;
   try {
-    if (questions.some(needsJudge)) config = evaluatorConfig();
+    if (
+      questions.some(needsJudge) ||
+      dimensionSelection ||
+      reuseDimensions
+    )
+      config = evaluatorConfig();
   } catch {
     /* Search remains usable; grading reports missing/invalid configuration. */
   }
-  return createCampaign(questions, config);
+  return createCampaign(questions, config, dimensionSelection, reuseDimensions);
 }
 export async function transaction<T>(
   fn: (state: State) => T | Promise<T>,
@@ -136,7 +157,10 @@ export function recover(s: State) {
     run.finishedAt = new Date().toISOString();
   }
 }
-export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
+export async function createRun(
+  input: CreateRunInput,
+  kind: Run["kind"] = "batch",
+) {
   const body = createRunSchema.parse(input),
     config = configSchema.parse({
       ...searchConfig(),
@@ -166,6 +190,9 @@ export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
     ...(body.promptOverrides === undefined
       ? {}
       : { promptOverrides: body.promptOverrides }),
+    ...(body.dimensions === undefined
+      ? {}
+      : { dimensions: body.dimensions }),
     ...(body.promptSelection
       ? {
           promptSelection: body.promptSelection,
@@ -279,7 +306,7 @@ export async function createRun(input: CreateRun, kind: Run["kind"] = "batch") {
       status: "active",
       concurrency: kind === "test" ? 1 : body.concurrency,
       config,
-      campaign: campaignFor(body.questions),
+      campaign: campaignFor(body.questions, body.dimensions),
       records: body.questions.map((question) => ({
         id: randomUUID(),
         runId: id,
@@ -326,13 +353,19 @@ export async function retryEvaluation(id: string, criteria?: Criteria) {
       validateApprovedReferences(question);
       record.question = question;
     }
-    if (!record.question.criteria)
+    const priorDimensions =
+      record.attempts.at(-1)?.campaign?.dimensions ?? run.campaign?.dimensions;
+    if (!record.question.criteria && !priorDimensions)
       throw new ConflictError(
-        "Import approved requirements before regrading this answer.",
+        "Import approved requirements or enable dimension evaluation before regrading this answer.",
       );
     // A new campaign preserves the old attempt snapshots and never regenerates the answer.
-    const campaign = campaignFor([record.question]);
-    if (!campaign.evaluator && needsJudge(record.question))
+    const campaign = campaignFor([record.question], undefined, priorDimensions);
+    if (
+      !campaign.evaluator &&
+      needsJudge(record.question) &&
+      !campaign.dimensions
+    )
       throw new ConflictError("Configure the evaluator before regrading.");
     record.queuedCampaign = campaign;
     run.generation = (run.generation ?? 0) + 1;
@@ -340,6 +373,7 @@ export async function retryEvaluation(id: string, criteria?: Criteria) {
     delete run.dispatchError;
     record.evaluationStatus = "pending";
     delete record.evaluation;
+    delete record.dimensionSuite;
     delete record.evaluationReason;
     run.status = "active";
     delete run.finishedAt;
@@ -348,7 +382,14 @@ export async function retryEvaluation(id: string, criteria?: Criteria) {
 }
 
 /** Regrade saved answers as one frozen campaign, without issuing any search calls. */
-export async function regradeRun(id: string, sidecar?: unknown) {
+export async function regradeRun(
+  id: string,
+  sidecar?: unknown,
+  dimensionSelection?: DimensionSelectionInput,
+) {
+  const selection = dimensionSelection
+    ? dimensionSelectionSchema.parse(dimensionSelection)
+    : undefined;
   return transaction(async (s) => {
     const run = s.runs.find((r) => r.id === id);
     if (!run || run.kind !== "batch")
@@ -370,24 +411,35 @@ export async function regradeRun(id: string, sidecar?: unknown) {
     } catch (e) {
       throw new ConflictError((e as Error).message);
     }
-    if (questions.some((q) => !q.criteria))
+    const priorDimensions =
+      run.campaign?.dimensions ??
+      run.records.flatMap((r) => r.attempts).at(-1)?.campaign?.dimensions;
+    if (questions.some((q) => !q.criteria) && !priorDimensions && !selection)
       throw new ConflictError(
         "Every case needs approved requirements. Supply a complete criteria sidecar.",
       );
     for (const q of questions) {
       validateApprovedReferences(q);
-      if (q.criteria!.projectId !== run.config.projectId)
+      if (q.criteria && q.criteria.projectId !== run.config.projectId)
         throw new ConflictError("Criteria project mismatch.");
     }
-    if (
-      new Set(questions.map((q) => q.criteria!.caseId)).size !==
-      questions.length
-    )
+    const caseIds = questions.flatMap((q) =>
+      q.criteria ? [q.criteria.caseId] : [],
+    );
+    if (new Set(caseIds).size !== caseIds.length)
       throw new ConflictError("Case IDs must be unique.");
     if (!run.records.some((r) => r.execution === "succeeded" && r.result))
       throw new ConflictError("No saved successful answers to regrade.");
-    const campaign = campaignFor(questions);
-    if (!campaign.evaluator && questions.some(needsJudge))
+    const campaign = campaignFor(
+      questions,
+      selection,
+      selection ? undefined : priorDimensions,
+    );
+    if (
+      !campaign.evaluator &&
+      questions.some(needsJudge) &&
+      !campaign.dimensions
+    )
       throw new ConflictError("Configure the evaluator before regrading.");
     run.records.forEach((record, i) => {
       record.question = questions[i];
@@ -395,6 +447,7 @@ export async function regradeRun(id: string, sidecar?: unknown) {
       record.queuedCampaign = campaign;
       record.evaluationStatus = "pending";
       delete record.evaluation;
+      delete record.dimensionSuite;
       delete record.evaluationReason;
     });
     run.generation = (run.generation ?? 0) + 1;
@@ -403,5 +456,19 @@ export async function regradeRun(id: string, sidecar?: unknown) {
     delete run.finishedAt;
     run.status = "active";
     return { id: run.id, campaignId: campaign.id };
+  });
+}
+
+/** Persist a blind preference comparison; the bounded history evicts the oldest. */
+export async function savePreferenceComparison(comparison: PreferenceComparison) {
+  const parsed = preferenceComparisonSchema.parse(comparison);
+  return transaction((s) => {
+    const list = s.preferenceComparisons ?? [];
+    if (list.some((c) => c.id === parsed.id))
+      throw new ConflictError("This comparison is already saved.");
+    list.push(parsed);
+    while (list.length > 20) list.shift();
+    s.preferenceComparisons = list;
+    return parsed.id;
   });
 }

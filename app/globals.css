@@ -1904,3 +1904,33 @@ pre {
 .prompt-editor .prompt-actions button, .prompt-editor .prompt-language-tabs button { margin-left: 0; }
 .prompt-source { background: #f5f8fc; padding: 12px; border-radius: 6px; margin-top: 12px; overflow-wrap: anywhere; }
 .prompt-editor fieldset.prompt-changed { border-color: #5377c8; }
+
+.badge.dim-pass { color: #27856e; background: #eaf7f2; }
+.badge.dim-fail { color: #bf5a56; background: #fff0ee; }
+.badge.dim-review { color: #a08137; background: #fbf5e8; }
+.badge.dim-not_applicable { color: #8190a2; background: #f0f3f7; }
+.badge.dim-error { color: #bf5a56; background: #fff0ee; }
+.dimension-editor .dimension-item {
+  border-top: 1px solid var(--border, #dde2e6);
+  padding: 10px 0;
+}
+.dimension-editor .dimension-item .badge { margin-left: 8px; }
+.dimension-policy {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 10px 0;
+}
+.dimension-policy select { padding: 6px; }
+.dimension-prompt { margin: 10px 0; }
+.dimension-prompt label { font-size: 12px; }
+.dimension-thresholds {
+  display: flex; flex-wrap: wrap; gap: 14px; align-items: center; margin: 10px 0;
+}
+.dimension-thresholds input[type="number"] { width: 80px; padding: 6px; }
+.prompt-diff {
+  font-family: monospace; font-size: 11px; white-space: pre-wrap;
+  background: #f5f8fc; padding: 10px; border-radius: 6px; overflow-wrap: anywhere;
+}
+.prompt-diff .diff-add { color: #27856e; display: block; }
+.prompt-diff .diff-del { color: #bf5a56; display: block; }
+.prompt-diff .diff-ctx { color: #8190a2; display: block; }
+.dimension-evidence { margin: 12px 0; }
+.dimension-summary { margin: 12px 0; }

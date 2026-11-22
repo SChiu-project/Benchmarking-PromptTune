@@ -6,10 +6,11 @@ import {
   calibrationTemplate,
   calibrationReport,
   stabilityReport,
+  cmsAgreementReport,
 } from "../lib/evaluation-reports";
 dotenv.config({ path: ".env.local", quiet: true });
 async function main() {
-  const [command, first, second, output] = process.argv.slice(2);
+  const [command, first, second, third, output] = process.argv.slice(2);
   const state = await readState();
   const run = (id: string) => {
     const r = state.runs.find((r) => r.id === id);
@@ -28,12 +29,22 @@ async function main() {
       run(first),
       JSON.parse(await readFile(second, "utf8")),
     );
+  else if (command === "cms-agreement" && first && second && third)
+    result = cmsAgreementReport(
+      run(first),
+      JSON.parse(await readFile(second, "utf8")),
+      third,
+    );
   else
     throw new Error(
-      "Usage: evaluation-report.ts compare <baselineRunId> <candidateRunId> [output.json] | template <runId> <output.json> | calibrate <runId> <labels.json> [output.json]",
+      "Usage: evaluation-report.ts compare <baselineRunId> <candidateRunId> [output.json] | template <runId> <output.json> | calibrate <runId> <labels.json> [output.json] | stability <runId> [output.json] | cms-agreement <runId> <fixture.json> <model> [output.json]",
     );
   const target =
-    command === "template" || command === "stability" ? second : output;
+    command === "template" || command === "stability"
+      ? second
+      : command === "cms-agreement"
+        ? output
+        : third;
   const serialized = JSON.stringify(result, null, 2) + "\n";
   if (target) {
     await writeFile(target, serialized, { mode: 0o600, flag: "wx" });

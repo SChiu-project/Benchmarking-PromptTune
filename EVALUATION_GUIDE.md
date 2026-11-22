@@ -68,13 +68,45 @@ Calibration procedure:
 1. Domain owners select 60–100 representative cases, including critical failures, numeric/unit errors, partial answers, multilingual paraphrases, missing references, injection and appropriate refusals. This is a pilot size, not a power guarantee.
 2. Two reviewers independently record their judgments, then an adjudicator resolves disagreements. Preserve the independent annotations as supporting material; the template captures the final adjudicated labels and reviewer identities. It does not verify that reviewers worked independently.
 3. Assign real `familyId` values and freeze calibration versus held-out splits before tuning. Paraphrases of one case stay in the same family. The report rejects any family shared across both splits. Tune only against calibration cases.
-4. Complete the four explanation-audit booleans based on actual evidence: quote provenance, semantic support, agreement with the computed decision, and supported corrective advice. Do not leave the template's default false/unknown values as if they were reviewed labels.
-5. Inspect held-out requirement/decision agreement, coverage, folder/language slices, critical false passes and their 95% Wilson interval. Pilot targets are at least 90% requirement agreement, no observed critical false passes with actual critical cases represented, and all explanation audits passing. The tool reports whether those targets are met; it never authorizes release automatically.
+4. Mark `blockingViolation` when reviewers establish a consequential blocking claim, even if checklist requirements are met. Complete the four explanation-audit booleans based on actual evidence: quote provenance, semantic support, agreement with the computed decision, and supported corrective advice. Do not leave the template's default false/unknown values as if they were reviewed labels.
+5. Inspect held-out requirement/decision agreement, coverage, folder/language slices, critical false passes and their 95% Wilson interval. Unknown/N/A labels are excluded from accuracy denominators, and semantic agreement is reported separately so deterministic checks cannot inflate judge accuracy. Pilot targets require at least 60 reviewed cases, at least 90% overall and semantic requirement agreement, no observed critical false passes with actual critical cases represented, and all explanation audits passing. The tool reports whether those targets are met; it never authorizes release automatically.
 6. Preselect about 20 stability cases and regrade the same saved answers three times with unchanged requirements and judge settings. The stability report checks identical evidence and configuration. Repeated calls diagnose stability; they are not independent correctness evidence.
 
 Paired comparisons require the same complete case set and project. Reference/requirement/policy/judge changes exclude that pair with a reason. Missing evaluations and review decisions remain explicit exclusions. Reports show improvements, regressions, unchanged cases, critical outcomes, folder/language slices, net pass-rate change and a Wilson interval for the improvement share among discordant pairs. That interval does not account for correlated case families. There is no automatic winner based on a small or selectively scored sample. Keep references and judge settings fixed when testing prompt changes; blind judgments omit prompt-variant identity.
 
 Provider token usage, when returned, supports a measured campaign-cost estimate using the provider's actual rates. No price, token budget or judge accuracy is assumed by this implementation.
+
+## CMS-style quality dimensions (draft rubric)
+
+Alongside requirement evaluation, a run can enable the `dimensions-v1.0` suite: context_relevance, temporal_accuracy, completeness, no_answer_detection, hallucination_detection and citation_quality. In the review dialog, check **Evaluate CMS-style quality dimensions**, pick the dimensions, choose the missing-passage policy (strict: N/A excluded from pass rates; cms-compatible: N/A counts as PASS, matching the CMS export), and review or edit each dimension's judge prompt and thresholds before starting. Edited prompts show a Modified badge and a diff against the default; the safety wrapper and JSON output contract are fixed. The final prompts, thresholds and policy are frozen into the run's campaign; workers use only that snapshot.
+
+Each dimension is judged independently (one judge call per dimension, one transport retry). A failed dimension is marked error and never counts as PASS; low-confidence verdicts become review. Code computes averages, ratios and pass decisions from validated judge rows; fabricated quotes are rejected. Overall PASS requires every applicable selected dimension to pass. The records page shows a per-dimension pass-rate table (CMS Summary-sheet shape) and per-record evidence; results are labeled **draft rubric, uncalibrated** until validated against human/CMS labels. Regrading reuses the frozen settings by default; the Runs-page regrade dialog can apply a new selection or edited prompts as a new campaign. Dimension grading needs the configured LLM evaluator but no approved criteria or expected answers.
+
+## CMS export fixtures, agreement and CMS-format export
+
+The committed fixture `tests/fixtures/cms-export-labels.json` holds 100 CMS benchmark cases × 2 models with CMS's per-dimension labels. The export has no passage content, so only temporal_accuracy, completeness and no_answer_detection can be re-judged from it; passage dimensions are N/A.
+
+```sh
+# Import saved answers (no Doc Search calls); --grade evaluates them with the configured evaluator.
+pnpm cms:import tests/fixtures/cms-export-labels.json --grade [--limit N]
+
+# Regrade imported runs through the normal engine path.
+pnpm exec tsx scripts/regrade-run.ts RUN_ID [RUN_ID...]
+
+# Per-dimension agreement with the CMS labels (excludes CMS judge errors and N/A).
+pnpm exec tsx scripts/evaluation-report.ts cms-agreement RUN_ID tests/fixtures/cms-export-labels.json MODEL_NAME [out.json]
+
+# CMS-compatible results.csv + summary.csv for one or two runs.
+pnpm cms:export RUN_ID [SECOND_RUN_ID] outDir
+```
+
+Measured agreement (2026-11-22, draft rubric, qwen3.8-flash judge): temporal_accuracy 100%, completeness ~97%, no_answer_detection ~68–73% — the latter dominated by the clarification policy difference (the draft passes justified clarifications; CMS fails them). Agreement with CMS labels is not human ground truth; adjudicated human calibration is still required before release gating. Reports from the validation run are in `reports/`.
+
+## Blind pairwise preference and dimension calibration
+
+`pnpm preference:compare BASELINE_RUN_ID CANDIDATE_RUN_ID [out.json]` judges two completed runs on the same case set blind: A/B order is randomized per case, variant identity never reaches the judge, and identical answers auto-tie without a call. The comparison (draft rubric `preference-v1.0`, uncalibrated) is persisted in a bounded history of 20 and prints CMS-style win/tie/unknown rates. It makes evaluator calls, never search calls.
+
+Calibration tools now cover dimensions too: `template` emits per-dimension label rows (status `unknown` until labeled) and works for criteria-free runs; `calibrate` computes per-dimension agreement and applies the ≥90% pilot target per track; `stability` checks the last three identical-configuration dimension attempts for row disagreement. Measured preference agreement with CMS labels was 76.1% (judge-vs-judge, not human ground truth); see `reports/preference-agreement.json`.
 
 ## Scope and remaining work
 

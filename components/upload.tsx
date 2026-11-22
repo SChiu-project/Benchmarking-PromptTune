@@ -27,6 +27,8 @@ import type {
 import { CriteriaEditor } from "./criteria-editor";
 import type { PromptSelection } from "@/lib/prompt-schema";
 import { PromptEditor } from "./prompt-editor";
+import { DimensionEditor } from "./dimension-editor";
+import type { DimensionSelectionInput } from "@/lib/dimension-contract";
 import {
   api,
   ErrorBox,
@@ -66,6 +68,11 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
       Question[] | undefined
     >(),
     [criteriaBlocked, setCriteriaBlocked] = useState(false),
+    [dimensionSelection, setDimensionSelection] = useState<
+      DimensionSelectionInput | undefined
+    >(),
+    [dimensionBlocked, setDimensionBlocked] = useState(false),
+    [dimensionEditorKey, setDimensionEditorKey] = useState(0),
     [promptEditorKey, setPromptEditorKey] = useState(0),
     [testId, setTestId] = useState(""),
     [testing, setTesting] = useState(false),
@@ -164,6 +171,9 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
       setPromptSelection(undefined);
       setPromptBlocked(false);
       setPromptEditorKey((value) => value + 1);
+      setDimensionSelection(undefined);
+      setDimensionBlocked(false);
+      setDimensionEditorKey((value) => value + 1);
     } catch (e) {
       setError((e as Error).message);
     } finally {
@@ -209,6 +219,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
           projectId: projectId.trim(),
           promptOverrides,
           promptSelection,
+          dimensions: dimensionSelection,
           idempotencyKey: submissionKey.current,
         }),
       });
@@ -223,6 +234,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     !review?.questions.length ||
     promptBlocked ||
     criteriaBlocked ||
+    dimensionBlocked ||
     !projectId.trim() ||
     projectId.trim().length > 500 ||
     Boolean(review.errors.length) ||
@@ -494,7 +506,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
             ? "Checking evaluator…"
             : configured
               ? "Evaluator configured"
-              : "Evaluator not configured · grading will be skipped"}
+              : "LLM evaluator not configured · deterministic checks available"}
         </span>
       </div>
       {review && (
@@ -569,6 +581,9 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                   setPromptSelection(undefined);
                   setPromptBlocked(false);
                   setPromptEditorKey((value) => value + 1);
+                  setDimensionSelection(undefined);
+                  setDimensionBlocked(false);
+                  setDimensionEditorKey((value) => value + 1);
                   submissionKey.current = crypto.randomUUID();
                   setTest(null);
                   setTestId("");
@@ -620,6 +635,19 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                 setCriteriaQuestions(questions);
                 setCriteriaBlocked(invalid);
                 submissionKey.current = crypto.randomUUID();
+              }}
+            />
+            <DimensionEditor
+              key={`dimensions-${dimensionEditorKey}`}
+              disabled={testing || starting}
+              evaluatorConfigured={configured}
+              onChange={(selection, invalid) => {
+                setDimensionSelection(selection);
+                setDimensionBlocked(invalid);
+                submissionKey.current = crypto.randomUUID();
+                setTest(null);
+                setTestId("");
+                setTestError("");
               }}
             />
             <div className="folder-tags">

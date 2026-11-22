@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { dimensionCampaignSchema } from "./dimension-contract";
 
 export const REQUIREMENT_RUBRIC = "requirements-v2.0";
 export const claimCategorySchema = z.enum([
@@ -189,6 +190,7 @@ export const campaignSchema = z.object({
   criteriaHash: z.string().length(64),
   referenceHash: z.string().length(64),
   evaluator: evaluatorSnapshotSchema.nullable(),
+  dimensions: dimensionCampaignSchema.optional(),
 });
 export type Campaign = z.infer<typeof campaignSchema>;
 export const sidecarSchema = z

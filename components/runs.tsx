@@ -5,12 +5,20 @@ import { startPolling } from "../lib/polling";
 import { useRouter } from "next/navigation";
 import { Plus, Layers3, Activity, CheckCircle2, Target } from "lucide-react";
 import type { RunSummary } from "@/lib/schema";
-import { api, Badge, ErrorBox, date, latency, percent } from "./common";
+import type { DimensionSelectionInput } from "@/lib/dimension-contract";
+import { DimensionEditor } from "./dimension-editor";
+import { api, Badge, ErrorBox, Modal, date, latency, percent } from "./common";
 export function RunsScreen() {
   const router = useRouter();
   const [runs, setRuns] = useState<RunSummary[]>([]),
     [loading, setLoading] = useState(true),
-    [error, setError] = useState("");
+    [error, setError] = useState(""),
+    [regradeId, setRegradeId] = useState(""),
+    [regradeSelection, setRegradeSelection] = useState<
+      DimensionSelectionInput | undefined
+    >(),
+    [regradeBlocked, setRegradeBlocked] = useState(false),
+    [regrading, setRegrading] = useState(false);
   useEffect(() => {
     let live = true;
     const stop = startPolling(
@@ -38,16 +46,21 @@ export function RunsScreen() {
       stop();
     };
   }, []);
-  async function regrade(id: string) {
+  async function submitRegrade() {
+    if (!regradeId || regrading) return;
+    setRegrading(true);
     try {
-      await api(`/api/runs/${id}/evaluate`, {
+      await api(`/api/runs/${regradeId}/evaluate`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: "{}",
+        body: JSON.stringify(
+          regradeSelection ? { dimensions: regradeSelection } : {},
+        ),
       });
-      router.push(`/records?run=${id}`);
+      router.push(`/records?run=${regradeId}`);
     } catch (e) {
       setError((e as Error).message);
+      setRegrading(false);
     }
   }
   return (
@@ -150,7 +163,9 @@ export function RunsScreen() {
                         disabled={runs.some((r) => r.status === "active")}
                         onClick={(e) => {
                           e.stopPropagation();
-                          void regrade(r.id);
+                          setRegradeSelection(undefined);
+                          setRegradeBlocked(false);
+                          setRegradeId(r.id);
                         }}
                       >
                         Regrade saved answers
@@ -214,6 +229,14 @@ export function RunsScreen() {
                           suppressed
                         </small>
                       )}
+                      {r.dimensions && (
+                        <small>
+                          Dimensions: {r.dimensions.overall.passed} pass /{" "}
+                          {r.dimensions.overall.failed} fail ·{" "}
+                          {percent(r.dimensions.overall.passRate)}
+                          {r.dimensions.mixed ? " (mixed)" : ""}
+                        </small>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -229,6 +252,48 @@ export function RunsScreen() {
         incompatible evaluator policies. Legacy scores are holistic ratings. A
         run stays active until both queues finish.
       </p>
+      {regradeId && (
+        <Modal
+          title="Regrade saved answers"
+          subtitle={`Run ${regradeId.slice(0, 8)} · no new Doc Search requests`}
+          onClose={() => {
+            if (!regrading) setRegradeId("");
+          }}
+        >
+          <div className="modal-body">
+            <ErrorBox message={error} />
+            <p className="muted">
+              By default the run&apos;s frozen evaluation settings are reused.
+              Enable dimensions below to grade with a new dimension selection
+              or edited prompts; that creates a new campaign and keeps prior
+              results.
+            </p>
+            <DimensionEditor
+              disabled={regrading}
+              onChange={(selection, blocked) => {
+                setRegradeSelection(selection);
+                setRegradeBlocked(blocked);
+              }}
+            />
+          </div>
+          <div className="modal-footer">
+            <button
+              className="button secondary"
+              disabled={regrading}
+              onClick={() => setRegradeId("")}
+            >
+              Cancel
+            </button>
+            <button
+              className="button primary"
+              disabled={regrading || regradeBlocked}
+              onClick={() => void submitRegrade()}
+            >
+              {regrading ? "Queuing…" : "Regrade saved answers"}
+            </button>
+          </div>
+        </Modal>
+      )}
     </>
   );
 }
