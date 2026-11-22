@@ -4,7 +4,9 @@ const hash = z.string().regex(/^[a-f0-9]{64}$/);
 export const cmsConnectionSchema = z.object({
   id: z.uuid(),
   kind: z.enum(["direct", "supervisor"]),
-  email: z.email(),
+  // Legacy field name: direct accounts may identify themselves with a username/UID.
+  // Supervisor grants still require a verified contact email from CMS.
+  email: z.string().min(1).max(500),
   uid: z.string().min(1),
   projects: z.array(z.string()).max(5000),
   sealed: z.string(),

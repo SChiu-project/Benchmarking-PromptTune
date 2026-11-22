@@ -405,11 +405,11 @@ describe("supervisor approval", () => {
         await supervisor.approval({
           action: "login",
           token,
-          username: "stranger@example.com",
+          username: "supervisor-login",
           password,
         })
       ).status,
-    ).toBe(403);
+    ).toBe(200); // Login name may differ from the verified supervisor contact email.
     fetcher.mockImplementationOnce(async () => Response.json(credentials));
     fetcher.mockImplementationOnce(async () =>
       Response.json({ ...profile, email: "stranger@example.com" }),
@@ -767,4 +767,54 @@ it("never grants access beyond the requesting browser's lifetime", async () => {
   expect(response.status).toBe(200);
   expect((await response.json()).expiresAt).toBe(browserEnd);
   expect((await owner.status()).connection.expiresAt).toBe(browserEnd);
+});
+
+it.each([
+  { projects: profile.projects, email: profile.email },
+  { projects: profile.projects, email: "cms_operator_01" },
+  { projects: profile.projects, username: "cms_operator_01" },
+  { projects: profile.projects },
+])("supports a plain CMS login name with profile %j", async (cmsProfile) => {
+  const upstream = fetcher.getMockImplementation() as (
+    input: string | URL,
+    init?: RequestInit,
+  ) => Promise<Response>;
+  fetcher.mockImplementation((input, init) =>
+    new URL(input).pathname === "/cms/user/me"
+      ? Promise.resolve(Response.json(cmsProfile))
+      : upstream(input, init),
+  );
+  const c = client();
+  const response = await c.session({
+    action: "login",
+    projectId: "project-a",
+    username: "cms_operator_01",
+    password,
+  });
+  expect(response.status).toBe(200);
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).username).toBe(
+    "cms_operator_01",
+  );
+  expect((await c.status()).connected).toBe(true);
+  expect((await loadPost(c.req("/api/cms/prompts/load", scope))).status).toBe(
+    200,
+  );
+});
+
+it("does not treat a supervisor login username as a verified contact email", async () => {
+  const { token } = await emailRequest();
+  fetcher.mockImplementationOnce(async () => Response.json(credentials));
+  fetcher.mockImplementationOnce(async () =>
+    Response.json({ projects: profile.projects, username: profile.email }),
+  );
+  const response = await client(false).approval({
+    action: "login",
+    token,
+    username: "cms_operator_01",
+    password,
+  });
+  expect(response.status).toBe(403);
+  expect(await response.json()).toMatchObject({
+    code: "CMS_SUPERVISOR_MISMATCH",
+  });
 });

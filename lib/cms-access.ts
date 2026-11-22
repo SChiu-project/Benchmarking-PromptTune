@@ -234,7 +234,12 @@ export async function cmsReadAccess(
   )
     throw missing();
   const credentials = credentialSchema.parse(await unseal(c.sealed, b.hash));
-  await cmsIdentity(credentials, projectId, c.email); // Recheck membership and session validity on every CMS operation.
+  // Direct accounts need project membership, without requiring an email profile.
+  await cmsIdentity(
+    credentials,
+    projectId,
+    c.kind === "supervisor" ? c.email : undefined,
+  );
   return { credentials, sessionHash: b.hash };
 }
 function requestByToken(data: CmsAccessState | undefined, token: string) {
@@ -289,12 +294,6 @@ export async function cmsLogin(
       "CMS_APPROVAL_CLOSED",
     );
   const projectId = approval?.projectId ?? input.projectId;
-  if (approval && input.username.toLowerCase() !== approval.email.toLowerCase())
-    throw new CmsError(
-      "Use the emailed supervisor's CMS account.",
-      403,
-      "CMS_SUPERVISOR_MISMATCH",
-    );
   await transaction((state) => {
     const data = prune(state);
     browser(data, sessionHash);

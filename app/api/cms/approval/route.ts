@@ -19,7 +19,7 @@ const actions = z.discriminatedUnion("action", [
   base
     .extend({
       action: z.literal("login"),
-      username: z.email().max(320),
+      username: z.string().trim().min(1).max(320),
       password: z.string().min(1).max(1000),
     })
     .strict(),

@@ -74,7 +74,7 @@ export function CmsApproval() {
             <dd>{details.requester}</dd>
             <dt>Project</dt>
             <dd>{details.projectId}</dd>
-            <dt>Supervisor CMS account</dt>
+            <dt>Supervisor contact email</dt>
             <dd>{details.email}</dd>
             <dt>Requested access</dt>
             <dd>
@@ -105,7 +105,7 @@ export function CmsApproval() {
             <>
               {!details.authenticated || reauthenticate ? (
                 <CmsLoginForm
-                  email={details.email}
+                  defaultUsername={details.email}
                   otpRequired={details.otpRequired}
                   disabled={busy}
                   onSubmit={(input) =>

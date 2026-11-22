@@ -102,7 +102,11 @@ export async function cmsIdentity(
 ) {
   const data = await cmsAuthRequest("/user/me", undefined, credentials);
   const identity = z
-    .object({ email: z.email(), projects: z.array(z.string()).max(5000) })
+    .object({
+      email: z.string().trim().max(320).nullish(),
+      username: z.string().trim().max(320).nullish(),
+      projects: z.array(z.string()).max(5000),
+    })
     .safeParse(data);
   if (!identity.success)
     throw new CmsError("CMS returned an unsupported user profile.");
@@ -114,14 +118,19 @@ export async function cmsIdentity(
     );
   if (
     expectedEmail &&
-    identity.data.email.toLowerCase() !== expectedEmail.toLowerCase()
+    (!z.email().safeParse(identity.data.email).success ||
+      identity.data.email!.toLowerCase() !== expectedEmail.toLowerCase())
   )
     throw new CmsError(
       "Sign in with the CMS account belonging to the emailed supervisor.",
       403,
       "CMS_SUPERVISOR_MISMATCH",
     );
-  return { ...identity.data, uid: credentials.uid };
+  return {
+    projects: identity.data.projects,
+    email: identity.data.email || identity.data.username || credentials.uid,
+    uid: credentials.uid,
+  };
 }
 export function loginOutcome(data: Record<string, unknown>) {
   if (data.passwordResetRequired || data.expired)

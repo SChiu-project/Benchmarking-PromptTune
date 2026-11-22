@@ -3,12 +3,12 @@ import { useState, type FormEvent } from "react";
 
 export function CmsLoginForm({
   otpRequired,
-  email,
+  defaultUsername,
   disabled = false,
   onSubmit,
 }: {
   otpRequired: boolean;
-  email?: string;
+  defaultUsername?: string;
   disabled?: boolean;
   onSubmit: (
     input: { username: string; password: string } | { code: string },
@@ -57,13 +57,12 @@ export function CmsLoginForm({
         ) : (
           <>
             <label>
-              CMS email
+              CMS username or email
               <input
                 name="username"
-                type="email"
+                type="text"
                 autoComplete="username"
-                defaultValue={email}
-                readOnly={Boolean(email)}
+                defaultValue={defaultUsername}
                 required
                 maxLength={320}
               />

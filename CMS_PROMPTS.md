@@ -6,7 +6,7 @@ The benchmark can read stored chatbot prompt sections from the verified llmGraph
 
 The project ID stays editable in the benchmark UI. **`CMS_PROJECT_IDS` is no longer used.** A direct login checks the selected project against the authenticated CMS user's `/user/me` project list, and each prompt operation rechecks membership with CMS.
 
-After uploading a CSV, expand **Test revised prompts → Connect to CMS → Direct CMS login**. Enter your CMS email and password. If CMS requests a verification code, enter it in the next form. The benchmark server calls CMS; this is a benchmark-hosted sign-in form, not an OAuth redirect or a CMS-native delegated grant.
+After uploading a CSV, expand **Test revised prompts → Connect to CMS → Direct CMS login**. Enter your CMS username (any non-empty account string, including an email address) and password. Direct accounts do not need a contact email in their CMS profile. If CMS requests a verification code, enter it in the next form. The benchmark server calls CMS; this is a benchmark-hosted sign-in form, not an OAuth redirect or a CMS-native delegated grant.
 
 Passwords and verification codes are never persisted. CMS `token`/`uid` values are encrypted with AES-256-GCM before storage; the browser receives only a random HttpOnly, SameSite=Lax cookie (Secure on Vercel). Direct connections last at most eight hours and still depend on the upstream CMS session remaining valid. Use **Renew or change CMS access** to sign in again, or **Disconnect CMS** to remove access without discarding prompt drafts.
 
@@ -20,7 +20,7 @@ A requester without a CMS account selects **Ask a supervisor**, enters their nam
 
 1. The server emails a random approval capability in the URL fragment. It is not returned to the requester, stored in plaintext, or included in the page URL sent to the server. Requests expire after 30 minutes.
 2. The supervisor opens `/cms/approve`, which does not require the shared benchmark password. Only that page and `/api/cms/approval` bypass workspace Basic authentication. A link inspection or CMS login cannot grant access by itself.
-3. The supervisor signs in with the exact emailed CMS account. The server checks that account's email and project membership through `/user/me`. This establishes project access; it does not establish an organizational supervisor role. The supervisor must recognize the requester and be authorized by their organization to share prompts.
+3. The supervisor may sign in with a username or email. The server checks the authenticated account's contact email against the email recipient and verifies project membership through `/user/me`; the login username itself is not used as proof of email ownership. This establishes project access; it does not establish an organizational supervisor role. The supervisor must recognize the requester and be authorized by their organization to share prompts.
 4. A separate consent checkbox and **Approve access** action grant prompt reads for that one project to the requester's original browser, for at most one hour. **Deny request** closes the request without access. A successful decision cannot be replayed to grant more access.
 5. The requester sees approval automatically, or can use **Check access**. Changing the project requires another authorization. The supervisor can use the same link to **Revoke access now** while the grant is active, including after signing in again from another browser. Requesters can cancel pending requests or disconnect to revoke their connection. New direct logins cancel outstanding approvals.
 
