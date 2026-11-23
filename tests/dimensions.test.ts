@@ -11,12 +11,16 @@ import {
   buildDimensionSystemPrompt,
   validateDimensionPromptBody,
   scoreDimension,
+  quoteMatches,
+  coerceJudgeOutput,
   notApplicableRow,
   aggregateDimensionSuite,
   evaluateDimensionSuite,
   judgeTimeoutMs,
   passagesForJudge,
   PASSAGE_JUDGE_LIMIT,
+  PASSAGE_CHAR_LIMIT,
+  PASSAGE_TOTAL_CHAR_BUDGET,
   type DimensionCampaign,
   type DimensionName,
   type DimensionRow,
@@ -634,15 +638,48 @@ describe("suite dispatch", () => {
   it("uses the longer live timeout and caps passages sent to the judge", () => {
     expect(judgeTimeoutMs(60000, 180000)).toBe(180000);
     expect(judgeTimeoutMs(180000, 60000)).toBe(180000);
-    const many = Array.from({ length: 57 }, (_, i) => ({
+    const short = Array.from({ length: 57 }, (_, i) => ({
       ...sources[0],
       id: `s${i}`,
-      content: "x".repeat(5000),
+      content: "x".repeat(200),
     }));
-    const capped = passagesForJudge(many);
-    expect(capped.sent).toHaveLength(PASSAGE_JUDGE_LIMIT);
-    expect(capped.omitted).toBe(37);
-    expect(capped.passages[0].content.length).toBe(4000);
+    // Typical retrieval (many short passages) is sent in full.
+    expect(passagesForJudge(short)).toMatchObject({
+      omitted: 0,
+      truncated: false,
+      evidence: { total: 57, sent: 57, truncated: false },
+    });
+    const tooMany = Array.from({ length: PASSAGE_JUDGE_LIMIT + 5 }, (_, i) => ({
+      ...sources[0],
+      id: `s${i}`,
+      content: "x".repeat(200),
+    }));
+    expect(passagesForJudge(tooMany).sent).toHaveLength(PASSAGE_JUDGE_LIMIT);
+    // Long passages are truncated per passage and capped by the total budget.
+    const long = Array.from({ length: 57 }, (_, i) => ({
+      ...sources[0],
+      id: `s${i}`,
+      content: "x".repeat(PASSAGE_CHAR_LIMIT + 1000),
+    }));
+    const capped = passagesForJudge(long);
+    expect(capped.sent).toHaveLength(
+      Math.floor(PASSAGE_TOTAL_CHAR_BUDGET / PASSAGE_CHAR_LIMIT),
+    );
+    expect(capped.omitted).toBe(57 - capped.sent.length);
+    expect(capped.truncated).toBe(true);
+    expect(capped.passages[0].content.length).toBe(PASSAGE_CHAR_LIMIT);
+  });
+  it("keeps the judge's raw text on failed attempts for audit", async () => {
+    mockJudge(() => ({ output: { verdict: "pass", unexpected: true } }));
+    const suite = await evaluateDimensionSuite(
+      question().query,
+      answer,
+      sources,
+      campaignWith(["completeness"]),
+      connection,
+    );
+    expect(suite.rows[0].status).toBe("error");
+    expect(suite.attempts[0].rawOutput).toContain("unexpected");
   });
   it("uses the frozen edited prompt body for judging", async () => {
     const marker = "EDITED-MARKER-42";
@@ -947,4 +984,154 @@ describe("engine integration and persistence", () => {
       await db.close();
     }
   }, 30000);
+});
+
+// Patterns observed in live pilot 6a4ca909 (qwen/qwen3.8-flash judge).
+describe("judge output robustness (pilot regressions)", () => {
+  const md = {
+    answer:
+      'Report it with **Form ND2A** "Notice of Change (Appointment/Cessation)" within **15 days**. [P1][P3]',
+    sources: [
+      {
+        id: "m1",
+        title: "ND2A",
+        url: null,
+        content:
+          'You should deliver a [Form ND2A](https://example.test/nd2a) \u201cNotice of Change (Appointment\u2571Cessation)\u201d within 15 days.\n**4. This form can be delivered by post to "The Registry, 14th floor, Queensway**  Government Offices".',
+        metadata: {},
+      },
+    ],
+    thresholds: { avgThreshold: 1, relevantMin: 1, confidenceFloor: 0.5 },
+  };
+  it("matches quotes across Markdown, link syntax, box-drawing slashes, curly quotes and spacing", () => {
+    expect(quoteMatches(md.answer, 'Form ND2A "Notice of Change (Appointment/Cessation)" within 15 days')).toBe(true);
+    expect(quoteMatches(md.sources[0].content, 'deliver a Form ND2A "Notice of Change (Appointment/Cessation)"')).toBe(true);
+    expect(quoteMatches(md.sources[0].content, "to \"The Registry, 14th floor, Queensway Government Offices\"")).toBe(true);
+    expect(quoteMatches(md.sources[0].content, "deliver a ... within 15 days")).toBe(true);
+    // Wording must still match; reordering or invented text is rejected.
+    expect(quoteMatches(md.sources[0].content, "within 30 days")).toBe(false);
+    expect(quoteMatches(md.sources[0].content, "within 15 days ... deliver a")).toBe(false);
+    expect(quoteMatches(md.sources[0].content, " ... ")).toBe(false);
+  });
+  it("accepts a supported claim quoted without Markdown", () => {
+    const row = scoreDimension(
+      "hallucination_detection",
+      {
+        verdict: "pass",
+        reason: "Supported.",
+        confidence: 0.9,
+        claims: [
+          {
+            claim: "ND2A within 15 days",
+            answer_quote: 'Form ND2A "Notice of Change (Appointment/Cessation)"',
+            status: "supported",
+            material: true,
+            passage_index: 1,
+            passage_quote: '"Notice of Change (Appointment/Cessation)" within 15 days',
+          },
+        ],
+      },
+      md,
+    );
+    expect(row.status).toBe("pass");
+  });
+  it("repairs unambiguous label drift and reports schema issue paths otherwise", () => {
+    const citations = {
+      verdict: "fail",
+      reason: "P3 misattributed.",
+      confidence: 0.9,
+      citations: [
+        {
+          marker: "[P3]",
+          passage_index: 1,
+          claim_quote: "within **15 days**",
+          status: "misattributes",
+          passage_quote: "",
+        },
+      ],
+      uncited_material_claims: [],
+      broken_markers: [],
+    };
+    expect(
+      (coerceJudgeOutput("citation_quality", citations) as { citations: { status: string; passage_quote: unknown }[] }).citations[0],
+    ).toMatchObject({ status: "misattributed", passage_quote: null });
+    expect(scoreDimension("citation_quality", citations, md).status).toBe("fail");
+    expect(
+      scoreDimension(
+        "citation_quality",
+        { ...citations, citations: [{ ...citations.citations[0], status: "mismatch" }] },
+        md,
+      ).status,
+    ).toBe("fail");
+    expect(buildDimensionSystemPrompt("citation_quality", "x".repeat(60))).toContain('"misattributed"');
+    const bad = scoreDimension(
+      "citation_quality",
+      { ...citations, citations: [{ ...citations.citations[0], status: "maybe" }] },
+      md,
+    );
+    expect(bad.status).toBe("error");
+    expect(bad.reason).toContain("citations.0.status");
+  });
+  it("sends review, not fail, when the answer cites passages the judge did not see", () => {
+    const row = scoreDimension(
+      "citation_quality",
+      {
+        verdict: "fail",
+        reason: "P3 has no matching passage.",
+        confidence: 0.9,
+        citations: [
+          { marker: "[P3]", passage_index: null, claim_quote: "within **15 days**", status: "broken", passage_quote: null },
+        ],
+        uncited_material_claims: [],
+        broken_markers: ["[P3]"],
+      },
+      { ...md, evidence: { total: 3, sent: 1, truncated: false } },
+    );
+    expect(row.status).toBe("review");
+    expect(row.reason).toContain("P3");
+    // A genuinely broken marker (beyond all retrieved passages) still fails.
+    expect(
+      scoreDimension(
+        "citation_quality",
+        {
+          verdict: "fail",
+          reason: "P3 has no matching passage.",
+          confidence: 0.9,
+          citations: [],
+          uncited_material_claims: [],
+          broken_markers: ["[P3]"],
+        },
+        { ...md, evidence: { total: 1, sent: 1, truncated: false } },
+      ).status,
+    ).toBe("fail");
+  });
+  it("sends unsupported-claim failures to review when passages were omitted, but keeps contradictions failing", () => {
+    const claim = {
+      claim: "Post delivery",
+      answer_quote: "within **15 days**",
+      material: true,
+      passage_index: null,
+      passage_quote: null,
+    };
+    const partial = { ...md, evidence: { total: 30, sent: 1, truncated: false } };
+    expect(
+      scoreDimension(
+        "hallucination_detection",
+        { verdict: "fail", reason: "Unsupported.", confidence: 0.9, claims: [{ ...claim, status: "unsupported" }] },
+        partial,
+      ).status,
+    ).toBe("review");
+    expect(
+      scoreDimension(
+        "hallucination_detection",
+        {
+          verdict: "fail",
+          reason: "Contradicted.",
+          confidence: 0.9,
+          claims: [{ ...claim, status: "contradicted", passage_index: 1, passage_quote: "within 15 days" }],
+        },
+        partial,
+      ).status,
+    ).toBe("fail");
+  });
 });

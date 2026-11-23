@@ -305,11 +305,30 @@ const labels = z
 export const calibrationLabelsSchema = z
   .object({ version: z.literal(1), cases: z.array(labels).min(1) })
   .strict();
+// Paired variants may share an approved caseId. Keep those answer records distinct.
+export function calibrationCaseIds(run: Run) {
+  const counts = new Map<string, number>();
+  for (const r of run.records) {
+    const id = r.question.criteria?.caseId ?? r.id;
+    counts.set(id, (counts.get(id) ?? 0) + 1);
+  }
+  const result = new Map(
+    run.records.map((r) => {
+      const id = r.question.criteria?.caseId ?? r.id;
+      return [r.id, counts.get(id) === 1 ? id : r.id];
+    }),
+  );
+  // A user-supplied caseId can itself equal another record's UUID.
+  return new Set(result.values()).size === run.records.length
+    ? result
+    : new Map(run.records.map((r) => [r.id, r.id]));
+}
 export function calibrationTemplate(run: Run) {
+  const ids = calibrationCaseIds(run);
   return {
     version: 1,
     cases: run.records.map((r) => ({
-      caseId: r.question.criteria?.caseId ?? r.id,
+      caseId: ids.get(r.id)!,
       reviewers: ["", ""],
       adjudicatedBy: "",
       split: "held_out",
@@ -349,9 +368,8 @@ export function calibrationReport(run: Run, raw: unknown) {
     if (c.familyId === "REPLACE_WITH_CASE_FAMILY")
       throw new Error("Assign real case-family IDs.");
   }
-  const records = new Map(
-    run.records.map((r) => [r.question.criteria?.caseId ?? r.id, r]),
-  );
+  const ids = calibrationCaseIds(run);
+  const records = new Map(run.records.map((r) => [ids.get(r.id)!, r]));
   if (
     labels.cases.length !== run.records.length ||
     labels.cases.some((c) => !records.has(c.caseId))
@@ -652,14 +670,13 @@ export function cmsAgreementReport(
   const fixture = cmsFixtureSchema.parse(rawFixture);
   if (!fixture.models.includes(model))
     throw new Error(`Fixture has no labels for model ${model}.`);
-  if (run.status === "active")
-    throw new Error("Wait for the run to finish.");
+  if (run.status === "active") throw new Error("Wait for the run to finish.");
   const byKey = new Map(
     fixture.cases.map((c) => [JSON.stringify([c.folder, c.query]), c]),
   );
-  const selected =
-    run.campaign?.dimensions?.dimensions.map((d) => d.name) ??
-    [...DIMENSION_NAMES];
+  const selected = run.campaign?.dimensions?.dimensions.map((d) => d.name) ?? [
+    ...DIMENSION_NAMES,
+  ];
   const perDimension = selected.map((dimension) => {
     const acc = {
       dimension,
@@ -704,9 +721,7 @@ export function cmsAgreementReport(
         acc.excluded.cmsError++;
         continue;
       }
-      const row = record.dimensionSuite?.rows.find(
-        (x) => x.name === dimension,
-      );
+      const row = record.dimensionSuite?.rows.find((x) => x.name === dimension);
       if (!record.dimensionSuite || !row) {
         acc.excluded.noSuite++;
         continue;

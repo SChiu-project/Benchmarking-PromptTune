@@ -11,3 +11,9 @@ COMPLETION.md
 Start Benchmark.command
 github-ready
 *.zip
+
+# Private calibration evidence, reviewer identities and generated test artifacts.
+reports
+test-results
+playwright-report
+*.tsbuildinfo

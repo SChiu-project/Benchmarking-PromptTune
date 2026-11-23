@@ -15,6 +15,10 @@ export async function POST(req: Request) {
     const body = z
       .object({
         question: questionSchema,
+        generationModels: z
+          .array(z.string().trim().min(1).max(200))
+          .length(1)
+          .optional(),
         idempotencyKey: z.uuid(),
         projectId: projectIdSchema.optional(),
         promptOverrides: promptOverridesSchema.optional(),
@@ -26,6 +30,7 @@ export async function POST(req: Request) {
     const id = await createRun(
       {
         questions: [body.question],
+        generationModels: body.generationModels,
         idempotencyKey: body.idempotencyKey,
         concurrency: 1,
         projectId: body.projectId,

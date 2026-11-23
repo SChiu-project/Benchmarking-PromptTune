@@ -13,6 +13,9 @@ import {
 } from "./schema";
 import { databaseMode, workflowMode, isVercel } from "./runtime";
 import { databaseTransaction, readDatabaseSnapshot } from "./postgres-store";
+import { validateModelSelection } from "./model-catalog";
+import { createComparisonConfig } from "./comparison";
+import { DIMENSION_NAMES } from "./dimension-contract";
 import { searchConfig } from "./doc-search";
 import {
   assertSnapshotScope,
@@ -57,11 +60,13 @@ function campaignFor(
   questions: Question[],
   dimensionSelection?: DimensionSelection,
   reuseDimensions?: DimensionCampaign,
+  model?: string,
 ) {
   let config: ReturnType<typeof evaluatorConfig> = null;
   try {
     if (questions.some(needsJudge) || dimensionSelection || reuseDimensions)
       config = evaluatorConfig();
+    if (config && model) config = { ...config, model };
   } catch {
     /* Search remains usable; grading reports missing/invalid configuration. */
   }
@@ -115,6 +120,10 @@ export function finishRuns(s: State) {
   for (const r of s.runs) {
     if (
       r.status === "active" &&
+      (!r.comparisons ||
+        r.comparisons.every(
+          (p) => !["pending", "running"].includes(p.status),
+        )) &&
       r.records.every(
         (x) =>
           ["succeeded", "failed", "interrupted"].includes(x.execution) &&
@@ -149,6 +158,10 @@ export function recover(s: State) {
           }
       }
     }
+    interruptComparisons(
+      run,
+      "Worker interrupted. Retry comparisons against saved answers.",
+    );
     run.status = "interrupted";
     run.finishedAt = new Date().toISOString();
   }
@@ -162,6 +175,8 @@ export async function createRun(
     config = configSchema.parse({
       ...searchConfig(),
       ...(body.projectId === undefined ? {} : { projectId: body.projectId }),
+      generationModels: body.generationModels,
+      evaluatorModel: body.evaluatorModel,
       ...(body.promptOverrides === undefined
         ? {}
         : { promptOverrides: body.promptOverrides }),
@@ -195,6 +210,10 @@ export async function createRun(
       ? {}
       : { promptDocumentFolder: body.promptDocumentFolder }),
     ...(body.dimensions === undefined ? {} : { dimensions: body.dimensions }),
+    ...(body.generationModels
+      ? { generationModels: body.generationModels }
+      : {}),
+    ...(body.evaluatorModel ? { evaluatorModel: body.evaluatorModel } : {}),
     ...(body.promptSelection
       ? {
           promptSelection: body.promptSelection,
@@ -222,6 +241,32 @@ export async function createRun(
         : JSON.stringify(hashInput),
     )
     .digest("hex");
+  // Repeated submissions return the persisted run without requiring upstream discovery again.
+  if (body.generationModels || body.evaluatorModel) {
+    const prior = (await readState()).runs.find(
+      (r) => r.idempotencyKey === body.idempotencyKey,
+    );
+    if (prior) {
+      if (prior.requestHash !== requestHash)
+        throw new ConflictError(
+          "This submission key was already used for a different batch.",
+        );
+      return prior.id;
+    }
+    const access = body.generationModels
+      ? await cmsAccess?.(config.projectId)
+      : undefined;
+    await validateModelSelection(
+      body.generationModels,
+      body.evaluatorModel,
+      config.projectId,
+      access?.credentials,
+    );
+    if (body.evaluatorModel && !evaluatorConfig())
+      throw new ConflictError(
+        "Configure the evaluator endpoint and key before selecting an evaluator.",
+      );
+  }
   let snapshot: PromptSnapshot | undefined;
   if (body.promptSelection) {
     // Completed submissions remain retryable after auth/snapshot expiry, without more upstream reads.
@@ -310,6 +355,37 @@ export async function createRun(
       );
     const id = randomUUID(),
       now = new Date().toISOString();
+    const comparing = kind === "batch" && body.generationModels?.length === 2;
+    const campaign = campaignFor(
+      body.questions,
+      body.dimensions ??
+        (comparing
+          ? { names: [...DIMENSION_NAMES], naPolicy: "strict" }
+          : undefined),
+      undefined,
+      body.evaluatorModel,
+    );
+    if (comparing && !campaign.dimensions?.judge)
+      throw new ConflictError(
+        "Configure an evaluator before starting a model comparison.",
+      );
+    config.evaluatorModel ??=
+      campaign.dimensions?.judge?.model ?? campaign.evaluator?.model;
+    const records = body.questions.flatMap((question) =>
+      (body.generationModels ?? [undefined]).map((generationModel) => ({
+        id: randomUUID(),
+        runId: id,
+        question,
+        generationModel,
+        execution: "queued" as const,
+        evaluationStatus:
+          kind === "test" ? ("skipped" as const) : ("pending" as const),
+        evaluationReason:
+          kind === "test" ? "Connectivity test only." : undefined,
+        createdAt: now,
+        attempts: [],
+      })),
+    );
     s.runs.push({
       id,
       idempotencyKey: body.idempotencyKey,
@@ -319,18 +395,22 @@ export async function createRun(
       status: "active",
       concurrency: kind === "test" ? 1 : body.concurrency,
       config,
-      campaign: campaignFor(body.questions, body.dimensions),
-      records: body.questions.map((question) => ({
-        id: randomUUID(),
-        runId: id,
-        question,
-        execution: "queued",
-        evaluationStatus: kind === "test" ? "skipped" : "pending",
-        evaluationReason:
-          kind === "test" ? "Connectivity test only." : undefined,
-        createdAt: now,
-        attempts: [],
-      })),
+      campaign,
+      records,
+      ...(comparing
+        ? {
+            comparisonConfig: createComparisonConfig(campaign.dimensions!),
+            comparisons: body.questions.map((_, i) => ({
+              id: randomUUID(),
+              recordIds: [records[i * 2].id, records[i * 2 + 1].id] as [
+                string,
+                string,
+              ],
+              status: "pending" as const,
+              attempts: [],
+            })),
+          }
+        : {}),
     });
     return id;
   });
@@ -344,7 +424,7 @@ export async function retryEvaluation(id: string, criteria?: Criteria) {
       throw new ConflictError(
         "Only saved successful answers can be evaluated.",
       );
-    if (workflowMode() && run.status === "active")
+    if ((workflowMode() || run.comparisons?.length) && run.status === "active")
       throw new ConflictError(
         "Wait until this run finishes before retrying its evaluation.",
       );
@@ -352,13 +432,20 @@ export async function retryEvaluation(id: string, criteria?: Criteria) {
       throw new ConflictError("Evaluation is already queued.");
     if (s.runs.some((r) => r.status === "active" && r.id !== run.id))
       throw new ConflictError("Another run is active. Wait for it to finish.");
+    if (criteria && run.comparisons?.length)
+      throw new ConflictError(
+        "Regrade both model variants with the same criteria using a new benchmark.",
+      );
     if (criteria) {
       const approved = criteriaSchema.parse(criteria);
       if (approved.projectId !== run.config.projectId)
         throw new ConflictError("Criteria project does not match this run.");
       if (
         run.records.some(
-          (r) => r.id !== id && r.question.criteria?.caseId === approved.caseId,
+          (r) =>
+            r.id !== id &&
+            r.generationModel === record.generationModel &&
+            r.question.criteria?.caseId === approved.caseId,
         )
       )
         throw new ConflictError("Case ID is already used in this run.");
@@ -373,7 +460,12 @@ export async function retryEvaluation(id: string, criteria?: Criteria) {
         "Import approved requirements or enable dimension evaluation before regrading this answer.",
       );
     // A new campaign preserves the old attempt snapshots and never regenerates the answer.
-    const campaign = campaignFor([record.question], undefined, priorDimensions);
+    const campaign = campaignFor(
+      [record.question],
+      undefined,
+      priorDimensions,
+      run.config.evaluatorModel,
+    );
     if (
       !campaign.evaluator &&
       needsJudge(record.question) &&
@@ -411,6 +503,10 @@ export async function regradeRun(
       throw new ConflictError(
         "Wait for the active run to finish before regrading.",
       );
+    if (sidecar !== undefined && run.comparisons?.length)
+      throw new ConflictError(
+        "Use a new benchmark to change criteria for paired models.",
+      );
     let questions: Question[];
     try {
       questions =
@@ -436,17 +532,20 @@ export async function regradeRun(
       if (q.criteria && q.criteria.projectId !== run.config.projectId)
         throw new ConflictError("Criteria project mismatch.");
     }
-    const caseIds = questions.flatMap((q) =>
-      q.criteria ? [q.criteria.caseId] : [],
+    const variantCaseIds = questions.map((q, i) =>
+      q.criteria
+        ? JSON.stringify([run.records[i].generationModel, q.criteria.caseId])
+        : String(i),
     );
-    if (new Set(caseIds).size !== caseIds.length)
-      throw new ConflictError("Case IDs must be unique.");
+    if (new Set(variantCaseIds).size !== variantCaseIds.length)
+      throw new ConflictError("Case IDs must be unique within each model.");
     if (!run.records.some((r) => r.execution === "succeeded" && r.result))
       throw new ConflictError("No saved successful answers to regrade.");
     const campaign = campaignFor(
       questions,
       selection,
       selection ? undefined : priorDimensions,
+      run.config.evaluatorModel,
     );
     if (
       !campaign.evaluator &&
@@ -463,6 +562,15 @@ export async function regradeRun(
       delete record.dimensionSuite;
       delete record.evaluationReason;
     });
+    if (run.comparisons?.length) {
+      run.campaign = campaign;
+      run.comparisonConfig = createComparisonConfig(campaign.dimensions!);
+      for (const pair of run.comparisons) {
+        pair.status = "pending";
+        delete pair.rows;
+        delete pair.reason;
+      }
+    }
     run.generation = (run.generation ?? 0) + 1;
     delete run.workflowRunId;
     delete run.dispatchError;
@@ -485,5 +593,39 @@ export async function savePreferenceComparison(
     while (list.length > 20) list.shift();
     s.preferenceComparisons = list;
     return parsed.id;
+  });
+}
+
+export function interruptComparisons(run: Run, reason: string) {
+  for (const pair of run.comparisons ?? []) {
+    if (!["pending", "running"].includes(pair.status)) continue;
+    pair.status = "failed";
+    pair.reason = reason;
+    const attempt = pair.attempts.at(-1);
+    if (attempt?.status === "running") {
+      attempt.status = "failed";
+      attempt.error = reason;
+      attempt.finishedAt = new Date().toISOString();
+    }
+  }
+}
+export async function retryComparisons(id: string) {
+  return transaction((s) => {
+    const run = s.runs.find((r) => r.id === id);
+    if (!run?.comparisonConfig || !run.comparisons?.length)
+      throw new ConflictError("Comparison benchmark not found.");
+    if (s.runs.some((r) => r.status === "active"))
+      throw new ConflictError("Wait for the active benchmark to finish.");
+    for (const pair of run.comparisons) {
+      pair.status = "pending";
+      delete pair.rows;
+      delete pair.reason;
+    }
+    run.generation = (run.generation ?? 0) + 1;
+    run.status = "active";
+    delete run.finishedAt;
+    delete run.workflowRunId;
+    delete run.dispatchError;
+    return run.id;
   });
 }

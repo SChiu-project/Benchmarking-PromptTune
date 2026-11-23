@@ -2371,3 +2371,16 @@ main:focus {
 .prompt-editor .prompt-section-card > fieldset { margin: 0; padding: 4px 18px 18px; border: 0; border-radius: 0; }
 .prompt-section-card > p { padding: 0 18px; }
 .prompt-section-card .prompt-language-tabs { margin-top: 14px; }
+
+/* Model selection and paired benchmark results use the existing surface tokens. */
+.model-selection { display: grid; gap: 12px; }
+.model-selection label { display: grid; gap: 6px; }
+.model-selection select { width: 100%; min-width: 0; }
+.model-selection .button { justify-self: start; }
+.export-actions { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 20px; }
+.comparison-case { padding: 16px 0; border-top: 1px solid var(--line); }
+.comparison-case summary { cursor: pointer; line-height: 1.7; }
+.comparison-answers { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin: 16px 0; }
+.comparison-answers > div { min-width: 0; overflow-wrap: anywhere; }
+.comparison-answer { white-space: pre-wrap; max-height: 360px; overflow: auto; }
+@media (max-width: 900px) { .comparison-answers { grid-template-columns: 1fr; } }

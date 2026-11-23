@@ -27,6 +27,16 @@ export async function benchmarkWorkflow(runId: string, generation: number) {
         }
       }),
     ]);
+    await Promise.all(
+      Array.from({ length: 2 }, async (_, lane) => {
+        for (let i = lane; i < plan.comparisonIds.length; i += 2) {
+          while (
+            !(await comparisonStep(runId, plan.comparisonIds[i], generation))
+          )
+            await sleep("2s");
+        }
+      }),
+    );
   } catch {
     await interruptStep(runId, generation);
   }
@@ -36,7 +46,11 @@ async function getPlan(runId: string, generation: number) {
   const { readState } = await import("../lib/store");
   const run = (await readState()).runs.find((r) => r.id === runId);
   return run?.status === "active" && (run.generation ?? 0) === generation
-    ? { concurrency: run.concurrency, ids: run.records.map((r) => r.id) }
+    ? {
+        concurrency: run.concurrency,
+        ids: run.records.map((r) => r.id),
+        comparisonIds: run.comparisons?.map((p) => p.id) ?? [],
+      }
     : null;
 }
 async function searchStep(runId: string, id: string, generation: number) {
@@ -53,4 +67,10 @@ async function interruptStep(runId: string, generation: number) {
   "use step";
   const { interruptCloudRun } = await import("../lib/cloud-jobs");
   await interruptCloudRun(runId, generation);
+}
+
+async function comparisonStep(runId: string, id: string, generation: number) {
+  "use step";
+  const { processComparison } = await import("../lib/comparison");
+  return processComparison(runId, id, generation);
 }

@@ -237,6 +237,8 @@ export const dimensionAttemptSchema = z
       })
       .optional(),
     error: z.string().optional(),
+    /** Judge text kept only for failed attempts, for audit and calibration. */
+    rawOutput: z.string().max(20000).optional(),
   })
   .strict();
 export const dimensionSuiteResultSchema = z
@@ -354,6 +356,14 @@ Give a confidence between 0 and 1. If no passages were provided, citations are n
     },
   };
 
+const LABEL_RULES: Partial<Record<DimensionName, string>> = {
+  hallucination_detection:
+    'Each claim "status" must be exactly one of: "supported", "contradicted", "unsupported".',
+  citation_quality:
+    'Each citation "status" must be exactly one of: "supports", "misattributed" (cited passage does not support the claim), "broken" (no matching passage).',
+  no_answer_detection:
+    '"behavior" must be exactly one of: "direct_answer", "honest_abstention", "justified_clarification", "unnecessary_clarification", "evasion".',
+};
 export function buildDimensionSystemPrompt(
   name: DimensionName,
   body: string,
@@ -365,7 +375,7 @@ Judge only what is observable in the supplied data. Do not use outside knowledge
 Quote exact spans when citing evidence. Never fabricate quotes. If the data is insufficient for a verdict, say so explicitly instead of guessing.
 ${body}
 Return ONLY JSON with this exact shape:
-${def.outputContract}`;
+${def.outputContract}${LABEL_RULES[name] ? `\n${LABEL_RULES[name]}` : ""}`;
 }
 export function validateDimensionPromptBody(
   name: DimensionName,
@@ -383,11 +393,144 @@ export function validateDimensionPromptBody(
       );
   return parsed.data;
 }
+/** Evidence actually shown to the judge; absent means all passages were sent in full. */
+export type JudgeEvidence = { total: number; sent: number; truncated: boolean };
 type ScoreContext = {
   answer: string;
   sources: SearchResult["sources"];
   thresholds: DimensionThresholds;
+  evidence?: JudgeEvidence;
 };
+const SLASHES = /[\u2215\u2044\u2571\uFF0F]/g;
+const QUOTES_DOUBLE = /[\u201C\u201D\u201E\u201F\u00AB\u00BB\u300C\u300D]/g;
+const QUOTES_SINGLE = /[\u2018\u2019\u201A\u201B]/g;
+const DASHES = /[\u2010-\u2015\u2212]/g;
+/**
+ * Canonical form for evidence matching. Judges routinely drop Markdown emphasis,
+ * link syntax and source-extraction artifacts (double spaces, box-drawing
+ * slashes, curly quotes) when quoting. Both sides are normalized identically,
+ * so wording must still match verbatim.
+ */
+export function normalizeEvidence(value: string) {
+  return value
+    .normalize("NFKC")
+    .replace(/!?\[([^\]]*)\]\([^)\s]*\)/g, "$1")
+    .replace(SLASHES, "/")
+    .replace(QUOTES_DOUBLE, '"')
+    .replace(QUOTES_SINGLE, "'")
+    .replace(DASHES, "-")
+    .replace(/[*_`]+/g, "")
+    .replace(/^\s*#+\s*/gm, "")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+/** True when every ellipsis-separated fragment of the quote occurs, in order. */
+export function quoteMatches(haystack: string, quote: string) {
+  const text = normalizeEvidence(haystack);
+  const fragments = quote
+    .split(/\.{3,}|\u2026/)
+    .map(normalizeEvidence)
+    .filter(Boolean);
+  if (!fragments.length) return false;
+  let from = 0;
+  for (const fragment of fragments) {
+    const at = text.indexOf(fragment, from);
+    if (at < 0) return false;
+    from = at + fragment.length;
+  }
+  return true;
+}
+const CITATION_MARKER = /\[P?(\d{1,3})\]/g;
+export function citedPassageIndices(answer: string) {
+  return [...new Set([...answer.matchAll(CITATION_MARKER)].map((m) => Number(m[1])))];
+}
+function evidenceIncomplete(ctx: ScoreContext) {
+  const e = ctx.evidence;
+  return !!e && (e.sent < e.total || e.truncated);
+}
+const SYNONYMS: Record<string, Record<string, string>> = {
+  citation: {
+    support: "supports",
+    supported: "supports",
+    misattributes: "misattributed",
+    misattribution: "misattributed",
+    misattribute: "misattributed",
+    // The citation prompt asks the judge to "explain the mismatch".
+    mismatch: "misattributed",
+    mismatched: "misattributed",
+    broken_marker: "broken",
+    invalid: "broken",
+  },
+  claim: {
+    support: "supported",
+    supports: "supported",
+    not_supported: "unsupported",
+    contradicts: "contradicted",
+    contradiction: "contradicted",
+  },
+};
+function canonicalLabel(value: unknown, table: Record<string, string>) {
+  if (typeof value !== "string") return value;
+  const key = value.trim().toLowerCase().replace(/[\s-]+/g, "_");
+  return table[key] ?? key;
+}
+const nullIfBlank = (v: unknown) =>
+  typeof v === "string" && !v.trim() ? null : v;
+/**
+ * Repairs label/format drift that carries no semantic ambiguity (tense or
+ * spelling variants of enum labels, case, blank strings for nullable fields,
+ * numeric strings). Anything else is left for strict schema validation.
+ */
+export function coerceJudgeOutput(name: DimensionName, raw: unknown): unknown {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return raw;
+  const o: Record<string, unknown> = { ...(raw as Record<string, unknown>) };
+  const num = (v: unknown) =>
+    typeof v === "string" && v.trim() !== "" && !Number.isNaN(Number(v))
+      ? Number(v)
+      : v;
+  if ("confidence" in o) o.confidence = num(o.confidence);
+  for (const key of ["verdict", "behavior"])
+    if (typeof o[key] === "string")
+      o[key] = (o[key] as string).trim().toLowerCase().replace(/[\s-]+/g, "_");
+  const mapRows = (key: string, fn: (r: Record<string, unknown>) => void) => {
+    if (Array.isArray(o[key]))
+      o[key] = (o[key] as unknown[]).map((r) => {
+        if (!r || typeof r !== "object") return r;
+        const row = { ...(r as Record<string, unknown>) };
+        fn(row);
+        return row;
+      });
+  };
+  if (name === "context_relevance")
+    mapRows("passages", (r) => {
+      r.index = num(r.index);
+      r.rating = num(r.rating);
+    });
+  if (name === "hallucination_detection")
+    mapRows("claims", (r) => {
+      r.status = canonicalLabel(r.status, SYNONYMS.claim);
+      r.passage_index = nullIfBlank(num(r.passage_index));
+      r.passage_quote = nullIfBlank(r.passage_quote);
+    });
+  if (name === "citation_quality")
+    mapRows("citations", (r) => {
+      r.status = canonicalLabel(r.status, SYNONYMS.citation);
+      r.passage_index = nullIfBlank(num(r.passage_index));
+      r.passage_quote = nullIfBlank(r.passage_quote);
+    });
+  if (name === "completeness")
+    mapRows("items", (r) => {
+      if (typeof r.status === "string") r.status = r.status.trim().toLowerCase();
+      r.answer_quote = nullIfBlank(r.answer_quote);
+    });
+  return o;
+}
+function schemaIssueSummary(error: z.ZodError) {
+  const parts = error.issues
+    .slice(0, 3)
+    .map((i) => `${i.path.join(".") || "(root)"}: ${i.code}`);
+  return parts.join("; ") + (error.issues.length > 3 ? "; …" : "");
+}
 const round2 = (n: number) => Math.round(n * 100) / 100;
 function baseRow(
   name: DimensionName,
@@ -404,16 +547,19 @@ function baseRow(
     totalCount: null,
   };
 }
+function incompleteNote(ctx: ScoreContext) {
+  const e = ctx.evidence;
+  if (!e) return "";
+  return `Incomplete judge evidence: ${e.sent} of ${e.total} passages sent${e.truncated ? ", some truncated" : ""}.`;
+}
 export const errorRow = (name: DimensionName, reason: string) =>
   baseRow(name, "error", reason);
 function inAnswer(ctx: ScoreContext, quote: string) {
-  return ctx.answer.includes(quote);
+  return quoteMatches(ctx.answer, quote);
 }
 function inPassage(ctx: ScoreContext, index: number | null, quote: string) {
-  return (
-    index !== null &&
-    !!ctx.sources?.[index - 1]?.content.includes(quote)
-  );
+  const passage = index === null ? undefined : ctx.sources?.[index - 1];
+  return !!passage && quoteMatches(passage.content, quote);
 }
 function withConfidence(
   row: DimensionRow,
@@ -457,11 +603,13 @@ export function scoreDimension(
   raw: unknown,
   ctx: ScoreContext,
 ): DimensionRow {
-  const parsed = dimensionJudgeOutputSchemas[name].safeParse(raw);
+  const parsed = dimensionJudgeOutputSchemas[name].safeParse(
+    coerceJudgeOutput(name, raw),
+  );
   if (!parsed.success)
     return errorRow(
       name,
-      "Judge output failed schema validation; dimension not scored.",
+      `Judge output failed schema validation (${schemaIssueSummary(parsed.error)}); dimension not scored.`,
     );
   const out = parsed.data;
   const t = ctx.thresholds;
@@ -589,6 +737,16 @@ export function scoreDimension(
     if (o.verdict !== computed)
       return errorRow(name, "Judge verdict contradicts its own claim rows.");
     const supported = o.claims.filter((c) => c.status === "supported").length;
+    if (computed === "fail" && !contradicted && evidenceIncomplete(ctx))
+      return {
+        ...baseRow(
+          name,
+          "review",
+          `${incompleteNote(ctx)} Material claims were judged unsupported, but the omitted or truncated passage text may support them. ${o.reason} Supported claims: ${supported}/${o.claims.length}.`,
+        ),
+        confidence: o.confidence,
+        claims: o.claims,
+      };
     return withConfidence(
       {
         ...baseRow(
@@ -603,6 +761,11 @@ export function scoreDimension(
     );
   }
   const o = out as z.infer<typeof dimensionJudgeOutputSchemas.citation_quality>;
+  const unseen = ctx.evidence
+    ? citedPassageIndices(ctx.answer).filter(
+        (i) => i > ctx.evidence!.sent && i <= ctx.evidence!.total,
+      )
+    : [];
   if (o.verdict === "not_applicable")
     return ctx.sources?.length
       ? errorRow(
@@ -639,6 +802,18 @@ export function scoreDimension(
       : "pass";
   if (o.verdict !== computed)
     return errorRow(name, "Judge verdict contradicts its own citation rows.");
+  if (unseen.length || (computed === "fail" && evidenceIncomplete(ctx)))
+    return {
+      ...baseRow(
+        name,
+        "review",
+        `${incompleteNote(ctx)}${unseen.length ? ` The answer cites passages the judge did not see (${unseen.map((i) => `P${i}`).join(", ")}), so those markers cannot be graded.` : ""} ${o.reason}`,
+      ),
+      confidence: o.confidence,
+      citations: o.citations,
+      uncitedMaterialClaims: o.uncited_material_claims,
+      brokenMarkers: o.broken_markers,
+    };
   return withConfidence(
     {
       ...baseRow(name, computed, o.reason),

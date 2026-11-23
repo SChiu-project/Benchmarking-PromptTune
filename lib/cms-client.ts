@@ -52,7 +52,7 @@ export type CmsReadAccess = {
   credentials: CmsCredentials;
   sessionHash: string;
 };
-async function cmsHeaders(credentials?: CmsCredentials) {
+export async function cmsHeaders(credentials?: CmsCredentials) {
   if (credentials)
     return { ...credentials, "x-source": "cms", Accept: "application/json" };
   // Local scripts may use the local user's connector session. Hosted reads

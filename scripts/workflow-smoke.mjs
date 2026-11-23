@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
-import { spawn } from "node:child_process";
+import { spawn, execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -95,15 +96,36 @@ const upstream = createServer(async (req, res) => {
         message: {
           series: [{ text: `Mock answer to ${value.user_queries[0]}` }],
         },
+        ans_model_type: value.ans_model_type,
         used_sections: [],
         langsmith_trace_id: "mock-only-trace",
       }),
     );
   } else {
     grades++;
+    const system = value.messages?.[0]?.content ?? "";
+    const result = system.includes("dimension-comparison-v1.0")
+      ? {
+          rows: [
+            {
+              name: "completeness",
+              preferred: "tie",
+              reason: "Both mock answers fully address the question.",
+            },
+          ],
+        }
+      : system.includes("Dimension: completeness.")
+        ? {
+            verdict: "pass",
+            reason: "Complete mock answer.",
+            confidence: 0.95,
+            items: [],
+            missing_core: [],
+          }
+        : grade;
     res.end(
       JSON.stringify({
-        choices: [{ message: { content: JSON.stringify(grade) } }],
+        choices: [{ message: { content: JSON.stringify(result) } }],
       }),
     );
   }
@@ -122,6 +144,25 @@ const protectedFetch = (url, options = {}) =>
       ...options.headers,
     },
   });
+const smokeEnv = {
+  ...process.env,
+  VERCEL: "",
+  BENCHMARK_HOSTED: "",
+  DATABASE_URL: databaseUrl,
+  BENCHMARK_NAMESPACE: "workflow-smoke",
+  APP_PASSWORD: smokePassword,
+  APP_USERNAME: "benchmark",
+  JOB_BACKEND: "workflow",
+  DATA_DIR: join(scratch, "data"),
+  WORKFLOW_TARGET_WORLD: "local",
+  WORKFLOW_LOCAL_DATA_DIR: join(scratch, "workflow"),
+  WORKFLOW_LOCAL_BASE_URL: base,
+  PORT: String(serverPort),
+  DOC_SEARCH_ENDPOINT: `http://127.0.0.1:${upstreamPort}/search`,
+  EVALUATOR_ENDPOINT: `http://127.0.0.1:${upstreamPort}/evaluate`,
+  EVALUATOR_MODEL: "mock-only",
+  EVALUATOR_API_KEY: "mock-key",
+};
 const server = spawn(
   process.execPath,
   [
@@ -133,25 +174,7 @@ const server = spawn(
     String(serverPort),
   ],
   {
-    env: {
-      ...process.env,
-      VERCEL: "",
-      BENCHMARK_HOSTED: "",
-      DATABASE_URL: databaseUrl,
-      BENCHMARK_NAMESPACE: "workflow-smoke",
-      APP_PASSWORD: smokePassword,
-      APP_USERNAME: "benchmark",
-      JOB_BACKEND: "workflow",
-      DATA_DIR: join(scratch, "data"),
-      WORKFLOW_TARGET_WORLD: "local",
-      WORKFLOW_LOCAL_DATA_DIR: join(scratch, "workflow"),
-      WORKFLOW_LOCAL_BASE_URL: base,
-      PORT: String(serverPort),
-      DOC_SEARCH_ENDPOINT: `http://127.0.0.1:${upstreamPort}/search`,
-      EVALUATOR_ENDPOINT: `http://127.0.0.1:${upstreamPort}/evaluate`,
-      EVALUATOR_MODEL: "mock-only",
-      EVALUATOR_API_KEY: "mock-key",
-    },
+    env: smokeEnv,
     stdio: ["ignore", "pipe", "pipe"],
   },
 );
@@ -282,6 +305,59 @@ try {
   assert.equal(detail.attempts.length, 2);
   assert.equal(detail.attempts[1].campaign.id, campaignId);
   assert.notEqual(detail.attempts[0].campaign.id, campaignId);
+  const seeded = await promisify(execFile)(
+    process.execPath,
+    ["--import", "tsx", "scripts/seed-comparison-smoke.ts"],
+    { env: smokeEnv },
+  );
+  const comparisonId = seeded.stdout.trim();
+  assert.match(comparisonId, /^[a-f0-9-]{36}$/);
+  assert.equal(
+    (
+      await protectedFetch(base + `/api/runs/${comparisonId}/dispatch`, {
+        method: "POST",
+      })
+    ).status,
+    200,
+  );
+  for (let i = 0; i < 100; i++) {
+    run = await (
+      await protectedFetch(base + `/api/runs/${comparisonId}`)
+    ).json();
+    if (run.summary.status !== "active") break;
+    await wait(400);
+  }
+  assert.equal(run.summary.status, "completed");
+  assert.equal(run.summary.comparisonProgress.completed, 1);
+  const comparison = await (
+    await protectedFetch(base + `/api/runs/${comparisonId}/comparisons`)
+  ).json();
+  assert.equal(comparison.cases[0].rows[0].preferred, "tie");
+  assert.equal(searches, 5);
+  assert.equal(grades, 7);
+  const csv = await (
+    await protectedFetch(base + `/api/runs/${comparisonId}/export`)
+  ).text();
+  assert(csv.includes("comparison_completeness_preferred"));
+  const retryComparison = await protectedFetch(
+    base + `/api/runs/${comparisonId}/comparisons`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: "{}",
+    },
+  );
+  assert.equal(retryComparison.status, 202);
+  for (let i = 0; i < 100; i++) {
+    run = await (
+      await protectedFetch(base + `/api/runs/${comparisonId}`)
+    ).json();
+    if (run.summary.status !== "active") break;
+    await wait(400);
+  }
+  assert.equal(run.summary.status, "completed");
+  assert.equal(searches, 5, "Comparison retry must not regenerate answers");
+  assert.equal(grades, 8);
   if (usePostgres) {
     const stored = await database.query(
       "SELECT jsonb_typeof(payload) AS kind FROM doc_benchmark_state",
@@ -289,7 +365,7 @@ try {
     assert.equal(stored.rows[0].kind, "object");
   }
   console.log(
-    `Workflow HTTP smoke (${usePostgres ? "PostgreSQL production driver" : "local JSON"}) passed: Basic auth, durable dispatch, duplicate submission, 2 benchmark searches, 4 evaluations, saved-answer campaign regrading, persistence, and record pagination. All upstream services were local mocks.`,
+    `Workflow HTTP smoke (${usePostgres ? "PostgreSQL production driver" : "local JSON"}) passed: Basic auth, durable dispatch, duplicate submission, 2 benchmark searches, 4 evaluations, saved-answer campaign regrading, persistence, record pagination, two-model generation, dimension comparison, comparison-only retry and CSV export. All upstream services were local mocks.`,
   );
 } catch (error) {
   console.error(logs.slice(-14000));

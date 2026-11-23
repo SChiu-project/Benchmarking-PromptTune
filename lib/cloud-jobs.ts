@@ -6,7 +6,7 @@ import {
   type DimensionSuiteResult,
 } from "./evaluation-dimensions";
 import { randomUUID } from "node:crypto";
-import { transaction, finishRuns } from "./store";
+import { transaction, finishRuns, interruptComparisons } from "./store";
 import { search, SearchFailure } from "./doc-search";
 import {
   evaluate,
@@ -65,7 +65,7 @@ export async function processCloudSearch(
     return {
       done: false,
       question: r.question,
-      config: run!.config,
+      config: { ...run!.config, answerModel: r.generationModel },
       started: r.startedAt,
     } as const;
   });
@@ -147,12 +147,7 @@ export async function processCloudEvaluation(
     else if (campaign && !r.question.criteria && !dims)
       reason =
         "Approved requirements are required. Import criteria before regrading.";
-    else if (
-      campaign &&
-      !campaign.evaluator &&
-      needsJudge(r.question) &&
-      !dims
-    )
+    else if (campaign && !campaign.evaluator && needsJudge(r.question) && !dims)
       reason =
         "Evaluator was not configured when this campaign was created. Configure it and regrade.";
     else if (dims && !dims.judge)
@@ -179,7 +174,9 @@ export async function processCloudEvaluation(
       return { done: true } as const;
     }
     if (
-      run!.records.filter((x) => x.evaluationStatus === "running").length >= 2
+      run!.records.filter((x) => x.evaluationStatus === "running").length +
+        (run!.comparisons?.filter((p) => p.status === "running").length ?? 0) >=
+      2
     )
       return { done: false } as const;
     r.evaluationStatus = "running";
@@ -335,6 +332,10 @@ export async function interruptCloudRun(runId: string, generation: number) {
           }
       }
     }
+    interruptComparisons(
+      run!,
+      "Workflow stopped. Retry comparisons against saved answers.",
+    );
     run!.status = "interrupted";
     run!.finishedAt = new Date().toISOString();
   });

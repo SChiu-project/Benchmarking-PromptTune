@@ -127,3 +127,30 @@ ORDER BY xact_start NULLS LAST;
 ```
 
 Old deployments can leave sessions that do not have the new idle timeout. Have the database owner inspect any persistent blocker before terminating it; do not delete saved benchmark rows. The supplied logs establish the timeout pattern but do not identify the original blocking session or prove a specific connection-provider fault. Local fault tests verify bounded failure and reconnection; live recovery still needs confirmation after redeployment. [PostgreSQL timeout behavior](https://www.postgresql.org/docs/current/runtime-config-client.html), [Neon transaction pooling](https://neon.com/docs/connect/connection-pooling).
+
+## Two-model release candidate: verification and rollback
+
+Create a named clean export without replacing an earlier export:
+
+```sh
+pnpm package:github --name release-candidate-YYYY-MM-DD
+```
+
+The candidate is written under `github-ready/<name>/`. Exported source has no local Git history, configured credentials, saved benchmark state, human-review packets, installed tools or incremental TypeScript cache. The packager refuses forcibly tracked private report paths and refuses an existing destination. Keep `reports/` excluded from deployments as well: it contains private evidence, reviewer identities and model mappings.
+
+For the two-model feature, verify these flows in a separate Preview workspace/database before production:
+
+1. Workspace authentication rejects unauthenticated access. CMS login grants reads only for authorized projects; expired/revoked sessions fail closed. OpenRouter discovery never receives the corporate proxy key.
+2. Both CMS model picklists load from `/cms/project/{projectId}/documentSearchBenchmark/models`. Changing project invalidates old selections. The submitted model IDs match the IDs reported by Doc Search; mismatches remain explicit.
+3. A one-question comparison saves two answers, individual dimension results and six comparative verdict/reason fields. Missing/incomplete evidence stays explicit rather than becoming a fabricated failure or winner. Inspect randomized A/B reason mappings.
+4. Reloads and workflow recovery preserve answers. A comparison-only retry increases comparison history without issuing new generation calls. Ambiguous generation timeouts are not resent automatically.
+5. Results and summary downloads retain both models, unscored/errors/review outcomes, all selected dimension columns, judge identity and rubric metadata. Keep a pre-change saved run to check history compatibility.
+6. Check actual hosted request durations and account limits. The current hosted evaluator step processes a whole dimension suite, with per-call timeouts/retries; mock workflow checks do not establish that worst-case slow upstream calls fit the deployed Function duration. Verify the deployment's duration allowance and a realistic full-evidence grading run before approving hosted release.
+
+Local test success is not evidence that hosted secrets, database networking, platform dispatch or current-source CI have passed. This checkout's local `deploy:check` only inspects local environment variables; a failure there does not prove an existing Vercel project's settings are missing. Verify that project's settings separately once the deployment target is identified. Do not reuse the corporate proxy key as the workspace password.
+
+**Human calibration gate:** the completed two-answer pilot is one tuned case family. The independent reviewer forms remain the source of human labels; unknown/default values must not be treated as reviewed. Review the borderline director/company-secretary citation attribution, then add representative independent case families and a frozen held-out split before claiming calibrated judge accuracy. A Preview may demonstrate software behavior while its grading remains explicitly uncalibrated.
+
+**Rollback preparation:** before promotion, let active benchmarks finish and take a consistent backup of the workspace snapshot plus the configuration required to decrypt CMS sessions. Preserve the last known good deployment and its matching state backup. The JSON snapshot has additive fields, but older application versions may strip unfamiliar model/comparison fields on their next write; code-only rollback is therefore not a proven data-preserving procedure. Stop mutation/worker traffic first, preserve the latest state separately, and rehearse restoring the matching old state into an isolated rollback workspace before applying it to production. A forward fix may preserve more recent results than restoring old state.
+
+Stop promotion or start recovery if access controls fail, a requested model silently changes, duplicate generation dispatch occurs, saved answers disappear, or durable execution cannot complete within the hosted limits. Establish hosted latency/error baselines during Preview verification rather than inventing numerical thresholds from the local pilot. No stakeholder notification or production promotion is implied by preparing this candidate.

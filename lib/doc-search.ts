@@ -21,6 +21,9 @@ export function searchRequest(q: Question, c: SearchConfig) {
     Boolean(c.promptOverrides || c.promptProvenance) &&
     promptCoversFolder(scope, q.folder);
   return {
+    ...(c.answerModel
+      ? { ans_model_type: c.answerModel, use_cache: false }
+      : {}),
     user_queries: [q.query],
     folder_names: [q.folder],
     project_id: c.projectId,
@@ -53,7 +56,15 @@ const observed = z
   .passthrough();
 export function adaptResponse(
   raw: unknown,
-): Pick<SearchResult, "answer" | "sources" | "traceId" | "promptVersion"> {
+): Pick<
+  SearchResult,
+  | "answer"
+  | "sources"
+  | "traceId"
+  | "promptVersion"
+  | "reportedModel"
+  | "answerSource"
+> {
   const data = observed.parse(raw);
   if (data.answering_failed)
     throw new Error("Doc Search reported answering_failed.");
@@ -67,7 +78,17 @@ export function adaptResponse(
         ? raw._prompt_version
         : undefined,
     );
+  const metadata = raw as Record<string, unknown>;
+  const bot = Array.isArray(metadata.bot_responses)
+    ? metadata.bot_responses.at(-1)
+    : undefined;
   return {
+    ...(typeof metadata.ans_model_type === "string"
+      ? { reportedModel: metadata.ans_model_type }
+      : {}),
+    ...(bot && typeof bot.answer_source === "string"
+      ? { answerSource: bot.answer_source }
+      : {}),
     answer,
     traceId: data.langsmith_trace_id || null,
     sources: sources.success
@@ -116,8 +137,18 @@ export async function search(
     }
     if (!response.ok)
       throw new Error(`Doc Search HTTP ${response.status}. See raw response.`);
+    const adapted = adaptResponse(raw);
     return {
-      ...adaptResponse(raw),
+      ...adapted,
+      ...(c.answerModel
+        ? {
+            modelVerification: adapted.reportedModel
+              ? adapted.reportedModel === c.answerModel
+                ? ("matched" as const)
+                : ("mismatch" as const)
+              : ("unreported" as const),
+          }
+        : {}),
       latencyMs: Math.round(performance.now() - start),
       rawRequest,
       rawResponse: raw,

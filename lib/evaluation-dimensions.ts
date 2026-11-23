@@ -70,8 +70,8 @@ export function resolveDimensionCampaign(
       ? {
           model: judge.model,
           endpoint: judge.endpoint,
-          timeoutMs: dimensions.some((d) =>
-            DIMENSION_DEFINITIONS[d.name].needsPassages,
+          timeoutMs: dimensions.some(
+            (d) => DIMENSION_DEFINITIONS[d.name].needsPassages,
           )
             ? Math.max(judge.timeoutMs, 180000)
             : judge.timeoutMs,
@@ -98,22 +98,38 @@ const envelopeSchema = z
       .min(1),
   })
   .passthrough();
-export const PASSAGE_JUDGE_LIMIT = 20;
+// Retrieved passages are usually short (median ~200 chars) but numerous
+// (27–57 per answer observed), so the cap is by count and a total budget.
+export const PASSAGE_JUDGE_LIMIT = 60;
+const RAW_OUTPUT_LIMIT = 20000;
+export const PASSAGE_CHAR_LIMIT = 8000;
+export const PASSAGE_TOTAL_CHAR_BUDGET = 160000;
 export function judgeTimeoutMs(frozenMs: number, currentMs: number) {
   const cap = isVercel() ? 180000 : 300000;
   return Math.min(cap, Math.max(frozenMs, currentMs));
 }
+/** Leading passages (original order and indices) that fit the judge budget. */
 export function passagesForJudge(sources: SearchResult["sources"]) {
   const all = sources ?? [];
-  const sent = all.slice(0, PASSAGE_JUDGE_LIMIT);
+  const sent: NonNullable<SearchResult["sources"]> = [];
+  let budget = PASSAGE_TOTAL_CHAR_BUDGET;
+  for (const source of all.slice(0, PASSAGE_JUDGE_LIMIT)) {
+    const size = Math.min(source.content.length, PASSAGE_CHAR_LIMIT);
+    if (sent.length && size > budget) break;
+    sent.push(source);
+    budget -= size;
+  }
+  const truncated = sent.some((s) => s.content.length > PASSAGE_CHAR_LIMIT);
   return {
     sent,
-    omitted: Math.max(0, all.length - sent.length),
+    omitted: all.length - sent.length,
+    truncated,
+    evidence: { total: all.length, sent: sent.length, truncated },
     passages: sent.map((s, i) => ({
       index: i + 1,
       title: s.title,
       url: s.url,
-      content: s.content.slice(0, 4000),
+      content: s.content.slice(0, PASSAGE_CHAR_LIMIT),
     })),
   };
 }
@@ -129,13 +145,11 @@ function judgeUserPayload(
     evaluation_date: evaluationDate,
     ...(omitted
       ? {
-          passage_note: `Only the first ${PASSAGE_JUDGE_LIMIT} of ${sources?.length ?? 0} passages were sent. Do not treat omitted passages as evidence.`,
+          passage_note: `Only the first ${passages.length} of ${sources?.length ?? 0} passages were sent. Do not treat omitted passages as evidence, and do not call a citation to an omitted passage broken.`,
         }
       : {}),
   };
-  const base: Record<string, unknown> = { evaluation_date: evaluationDate };
-  if (name === "context_relevance")
-    return { ...payload, question, passages };
+  if (name === "context_relevance") return { ...payload, question, passages };
   if (name === "temporal_accuracy")
     return { ...payload, answer, ...(passages.length ? { passages } : {}) };
   if (name === "completeness" || name === "no_answer_detection")
@@ -190,11 +204,20 @@ async function callDimensionJudge(
           ],
         }),
       });
-      if (!response.ok)
-        throw new Error(`Evaluator HTTP ${response.status}.`);
+      if (!response.ok) throw new Error(`Evaluator HTTP ${response.status}.`);
       const envelope = envelopeSchema.parse(await response.json());
+      const content = envelope.choices[0].message.content;
+      let raw: unknown;
+      try {
+        raw = JSON.parse(content);
+      } catch (parseError) {
+        // Retry once; on the final attempt keep the text so the failure is auditable.
+        if (attempt === 0) throw parseError;
+        raw = undefined;
+      }
       return {
-        raw: JSON.parse(envelope.choices[0].message.content) as unknown,
+        raw,
+        content,
         providerModel: envelope.model,
         usage: envelope.usage,
       };
@@ -232,17 +255,19 @@ export async function evaluateDimensionSuite(
   const results = await pool(
     frozen.dimensions,
     3,
-    async (config): Promise<{ row: DimensionRow; attempt: z.infer<typeof dimensionAttemptSchema> }> => {
+    async (
+      config,
+    ): Promise<{
+      row: DimensionRow;
+      attempt: z.infer<typeof dimensionAttemptSchema>;
+    }> => {
       const startedAt = new Date().toISOString();
       const attemptBase = {
         name: config.name,
         promptHash: config.promptHash,
         startedAt,
       };
-      if (
-        DIMENSION_DEFINITIONS[config.name].needsPassages &&
-        !sources?.length
-      )
+      if (DIMENSION_DEFINITIONS[config.name].needsPassages && !sources?.length)
         return {
           row: notApplicableRow(config.name, frozen.naPolicy),
           attempt: {
@@ -267,11 +292,14 @@ export async function evaluateDimensionSuite(
             evaluationDate,
           ),
         );
-        const judgedSources = passagesForJudge(sources).sent;
+        const judgedEvidence = passagesForJudge(sources);
         const row = scoreDimension(config.name, judged.raw, {
           answer,
-          sources: judgedSources.length ? judgedSources : sources,
+          sources: judgedEvidence.sent,
           thresholds: config.thresholds,
+          ...(DIMENSION_DEFINITIONS[config.name].needsPassages
+            ? { evidence: judgedEvidence.evidence }
+            : {}),
         });
         return {
           row,
@@ -283,7 +311,12 @@ export async function evaluateDimensionSuite(
               ? { providerModel: judged.providerModel }
               : {}),
             ...(judged.usage ? { usage: judged.usage } : {}),
-            ...(row.status === "error" ? { error: row.reason } : {}),
+            ...(row.status === "error"
+              ? {
+                  error: row.reason,
+                  rawOutput: judged.content.slice(0, RAW_OUTPUT_LIMIT),
+                }
+              : {}),
           },
         };
       } catch (e) {

@@ -63,6 +63,12 @@ export async function recoverStoppedWorkflow(id: string) {
     );
   const now = Date.now();
   if (
+    run.comparisons?.some(
+      (p) =>
+        p.status === "running" &&
+        p.attempts.at(-1) &&
+        now - Date.parse(p.attempts.at(-1)!.startedAt) < 330000,
+    ) ||
     run.records.some(
       (r) =>
         (r.execution === "running" &&

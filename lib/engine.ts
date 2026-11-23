@@ -1,3 +1,4 @@
+import { processComparison } from "./comparison";
 import { evidenceHash } from "./evaluation-snapshot";
 import { REQUIREMENT_RUBRIC, needsJudge } from "./evaluation-contract";
 import {
@@ -29,6 +30,7 @@ type Dependencies = {
 export class Engine {
   private docs = new Set<string>();
   private evals = new Set<string>();
+  private comparisons = new Set<string>();
   constructor(
     private deps: Dependencies = { search, evaluate, config: evaluatorConfig },
   ) {}
@@ -36,7 +38,7 @@ export class Engine {
     const jobs = await transaction((s) => {
       finishRuns(s);
       const run = s.runs.find((r) => r.status === "active");
-      if (!run) return { docs: [], evals: [] };
+      if (!run) return { docs: [], evals: [], comparisons: [] };
       const docs = run.records
         .filter((r) => r.execution === "queued")
         .slice(0, Math.max(0, run.concurrency - this.docs.size));
@@ -85,7 +87,7 @@ export class Engine {
           r.evaluationReason = reason;
           continue;
         }
-        if (this.evals.size >= 2) break;
+        if (this.evals.size + this.comparisons.size >= 2) break;
         r.evaluationStatus = "running";
         delete r.evaluationReason;
         this.evals.add(r.id);
@@ -116,12 +118,43 @@ export class Engine {
         });
         evaluations.push(r);
       }
+      const comparisons = (run.comparisons ?? [])
+        .filter(
+          (p) =>
+            p.status === "pending" &&
+            !this.comparisons.has(p.id) &&
+            p.recordIds.every((id) => {
+              const r = run.records.find((r) => r.id === id)!;
+              return (
+                !["queued", "running"].includes(r.execution) &&
+                !["pending", "running"].includes(r.evaluationStatus)
+              );
+            }),
+        )
+        .slice(0, Math.max(0, 2 - this.evals.size - this.comparisons.size));
+      for (const p of comparisons) this.comparisons.add(p.id);
       finishRuns(s);
       return {
-        docs: docs.map((r) => ({ record: r, config: run.config })),
+        comparisons: comparisons.map((p) => ({
+          runId: run.id,
+          pairId: p.id,
+          generation: run.generation ?? 0,
+        })),
+        docs: docs.map((r) => ({
+          record: r,
+          config: { ...run.config, answerModel: r.generationModel },
+        })),
         evals: evaluations,
       };
     });
+    for (const j of jobs.comparisons)
+      void processComparison(j.runId, j.pairId, j.generation)
+        .catch((e) => {
+          console.error("Comparison persistence failed; worker stopping.", e);
+          process.exitCode = 1;
+          process.kill(process.pid, "SIGTERM");
+        })
+        .finally(() => this.comparisons.delete(j.pairId));
     for (const j of jobs.docs)
       void this.execute(j.record.id, j.record.question, j.config).catch((e) => {
         console.error("Search persistence failed; worker stopping.", e);
@@ -200,14 +233,9 @@ export class Engine {
       }
       if (dims) {
         try {
-          suite = await (this.deps.evaluateDimensions ??
-            evaluateDimensionSuite)(
-            q.query,
-            saved.answer,
-            saved.sources,
-            dims,
-            this.deps.config(),
-          );
+          suite = await (
+            this.deps.evaluateDimensions ?? evaluateDimensionSuite
+          )(q.query, saved.answer, saved.sources, dims, this.deps.config());
         } catch (e) {
           dimError = e;
         }
@@ -267,6 +295,6 @@ export class Engine {
     }
   }
   get busy() {
-    return this.docs.size + this.evals.size;
+    return this.docs.size + this.evals.size + this.comparisons.size;
   }
 }

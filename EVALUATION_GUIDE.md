@@ -82,6 +82,8 @@ Alongside requirement evaluation, a run can enable the `dimensions-v1.0` suite: 
 
 Each dimension is judged independently (one judge call per dimension, one transport retry). A failed dimension is marked error and never counts as PASS; low-confidence verdicts become review. Code computes averages, ratios and pass decisions from validated judge rows; fabricated quotes are rejected. Overall PASS requires every applicable selected dimension to pass. The records page shows a per-dimension pass-rate table (CMS Summary-sheet shape) and per-record evidence; results are labeled **draft rubric, uncalibrated** until validated against human/CMS labels. Regrading reuses the frozen settings by default; the Runs-page regrade dialog can apply a new selection or edited prompts as a new campaign. Dimension grading needs the configured LLM evaluator but no approved criteria or expected answers.
 
+**Judge evidence and validation.** Passages are sent in their original order and numbering, up to 60 passages, 8,000 characters each and 160,000 characters in total. Typical retrievals (27–57 short passages) are sent in full. Quote checks compare normalized text: Markdown emphasis, link syntax, curly quotes, dash/slash variants (including `╱` from PDF extraction) and whitespace are ignored. An ellipsis splits a quote into fragments that must each occur, in order. The wording itself must still match. Unambiguous label drift such as `misattributes`/`misattributed` or blank strings for nullable quotes is canonicalized before strict schema validation. Any other schema failure is an error whose reason names the failing field paths. Failed attempts keep the judge's raw text (`rawOutput`, up to 20,000 characters) for audit. When passages were omitted or truncated, the result is **review** instead of fail in two cases: a citation_quality result for an answer citing a passage the judge never saw, and a hallucination_detection failure that rests only on unsupported claims. Contradictions still fail.
+
 ## CMS export fixtures, agreement and CMS-format export
 
 The committed fixture `tests/fixtures/cms-export-labels.json` holds 100 CMS benchmark cases × 2 models with CMS's per-dimension labels. The export has no passage content, so only temporal_accuracy, completeness and no_answer_detection can be re-judged from it; passage dimensions are N/A.
@@ -111,3 +113,47 @@ Calibration tools now cover dimensions too: `template` emits per-dimension label
 ## Scope and remaining work
 
 The software workflow is implemented; real domain approvals, independent human labeling, pilot model calls, held-out validation and production rollout are operational work that has not been performed by these code changes. No PostHog integration was installed. The existing benchmark implements the useful separation of code checks, judge checks, result types and evidence. Consider a platform integration only when production monitoring/review needs justify it.
+
+## Selectable generation models and dimension comparisons
+
+The CSV review includes **Benchmark models**. Keep the project default, select one CMS model, or compare two different CMS models. Connect to CMS and load its model choices before selecting explicit generation models. Load evaluation models from OpenRouter to choose one judge for the benchmark. The evaluator endpoint/key stay on the server. `EVALUATOR_ALLOWED_MODELS` can restrict choices to models enabled through the corporate proxy; the public OpenRouter catalog alone does not establish proxy entitlement. Choices advertise text input/output, JSON response format and temperature support. Catalogs are validated at submission, and OpenRouter metadata is cached for five minutes. There is no automatic model substitution on failure.
+
+Comparison mode creates one run with two independently persisted answer records per question. Requests are interleaved by question and share the existing generation concurrency limit. Each sends `ans_model_type` and `use_cache:false`. The first-query test uses model A. Normal requirement evaluations and selected quality dimensions run on each answer. If no quality dimensions are selected, comparison mode enables all six with the strict N/A policy. One combined pairwise judge request per question returns a separate verdict and reason for every selected dimension; these verdicts do not replace either model's individual grades.
+
+The pairwise rubric is `dimension-comparison-v1.0`, an uncalibrated draft. Answer order is randomized, model identities are omitted from the judge payload, each answer retains its own passage evidence, and missing, omitted or truncated passage evidence forces passage dimensions to unassessable rather than treating unseen evidence as absent. Identical answer text is not automatically a tie because retrieval/citation evidence can differ. Generation failures, unreported model IDs and reported/requested ID mismatches produce unassessable comparisons. A matching `ans_model_type` is a match against the upstream-reported configuration, not independent proof that the selected model executed; early tool returns and fallback behavior still require trace inspection.
+
+Comparison prompts, thresholds, judge configuration, evaluation date and prompt hash are frozen. Each attempt retains its configuration, evidence hash and randomized ordering. A comparison-only retry uses saved answers and the original comparison configuration. Regrading the full run creates fresh individual evaluations and comparisons; earlier comparison attempts retain their snapshots. Changing approved criteria on one variant is blocked: create a new paired benchmark so both sides use the same criteria. Run completion waits for comparison work. Local restart or stopped-workflow recovery marks incomplete comparisons failed; retries never regenerate answers. The grading limit of two is shared with comparisons.
+
+Select a comparison run in Records to inspect both answers, each model's dimension grades, and a comparative verdict/reason per dimension. **Export results CSV** includes both answers, normal evaluations, selected/reported generation model IDs, model-match status, evaluator identity, comparison verdicts/reasons and rubric metadata. **Export summary CSV** includes individual model pass rates and comparative counts. The CLI `pnpm cms:export RUN_ID outDir` also supports paired-model runs. CSV headers cover the union of all row fields. Judge reasons retain the randomized A/B labels; the UI displays their model mapping, and exports include `comparison_reason_A_model` and `comparison_reason_B_model` so these labels cannot be confused with the original model order.
+
+These are comparisons of the complete Doc Search configurations. Untouched CMS settings, documents, retrieval results and provider revisions are not pinned. Keep them stable, inspect traces, and human-review a representative pilot before interpreting small preference differences as evidence that a generation model is better.
+
+### CMS catalog integration status
+
+Generation models load from `GET /cms/project/{projectId}/documentSearchBenchmark/models`, using the current CMS session and project authorization. This is the endpoint used by the CMS benchmark page at `https://setsail-dev.web.app/?#/documentSearchBenchmark`. Its authenticated response is `{success: true, models: {modelId: displayName}}`; model IDs are preserved exactly, including provider prefixes and CMS enum names. The live read returned 64 models for both tested projects (MTR and Companies Registry). Optional `CMS_MODELS_PATH` overrides the GET route relative to `CMS_API_BASE_URL`, with `{projectId}` substitution; root/data model lists are also supported for compatible custom adapters. No model choices are hard-coded and no CMS settings are changed.
+
+The earlier `/graph/project-config/binding/get` endpoint was verified after login but returns composition/binding configuration rather than model choices; it is no longer used for catalog discovery.
+
+## Independent review packet for paired answers
+
+Prepare full saved evidence and blank forms without making any model calls:
+
+```sh
+pnpm exec tsx scripts/calibration-packet.ts RUN_ID reports/new-review-packet
+```
+
+The destination must be new; existing directories/files are never overwritten. Files and directories are created with private permissions. Give both reviewers `reviewers/evidence.json`, then give each only their own `reviewer-1.json` or `reviewer-2.json`. The evidence includes all saved passages without evaluator truncation, the question/reference, and the frozen dimension instructions. It omits model identifiers, traces, raw upstream metadata and machine judgments. The packet randomizes answer order; answer text or source content can still reveal origin, so this is metadata blinding rather than a guarantee of anonymity.
+
+Each reviewer independently fills their identity, completion time, dimension statuses, reasons and exact evidence quotations. Unknown statuses start as unreviewed placeholders; they are not completed labels. Reviewers must not consult `coordinator/` files before locking their judgments.
+
+After both forms are locked, a coordinator uses `coordinator/identity-map.json` to map anonymous answer IDs to the `caseId` entries in `coordinator/adjudication.json`. Preserve the original reviewer forms. Record both reviewer names, an adjudicator identity, agreed/adjudicated dimensions, overall decision and any blocking violation. Assess the machine explanation audits only after the independent labels have been locked. A passage about a director does not automatically support an analogous claim about a company secretary; the adjudicator must record the evidence and domain rationale for that decision.
+
+Then run the existing report:
+
+```sh
+pnpm exec tsx scripts/evaluation-report.ts calibrate RUN_ID reports/new-review-packet/coordinator/adjudication.json reports/new-review-packet/coordinator/report.json
+```
+
+The packet retains evidence hashes; check that the saved question, answer, reference and passages still match before reporting. Empty reviewer identities are rejected by the report. No tool proves that reviewers acted independently. Shared approved case IDs across model variants use distinct record IDs for calibration labels; legacy unique case IDs remain unchanged.
+
+This packet is marked **calibration**, because the pilot has already been used for tuning. It must not become held-out evidence. Exact question/folder matches share a family ID, and domain reviewers must additionally group paraphrases and related cases before creating a larger split. The current pilot has two answers to one question, not two independent questions. A representative held-out study remains necessary before judge accuracy or release readiness can be claimed.

@@ -13,6 +13,7 @@ import {
   ExternalLink,
 } from "lucide-react";
 import type { RecordData, RunSummary } from "@/lib/schema";
+import { ComparisonResults } from "./comparison-results";
 import { CriteriaEditor } from "./criteria-editor";
 import { EvaluationScore, RequirementEvidence } from "./requirement-evaluation";
 import {
@@ -250,6 +251,33 @@ export function RecordsScreen() {
           />
         </div>
       )}
+      {run && (
+        <div className="export-actions">
+          <a
+            className="button secondary small"
+            aria-disabled={run.status === "active"}
+            href={
+              run.status === "active" ? undefined : `/api/runs/${run.id}/export`
+            }
+          >
+            Export results CSV
+          </a>
+          <a
+            className="button secondary small"
+            aria-disabled={run.status === "active"}
+            href={
+              run.status === "active"
+                ? undefined
+                : `/api/runs/${run.id}/export?kind=summary`
+            }
+          >
+            Export summary CSV
+          </a>
+        </div>
+      )}
+      {run?.comparisonProgress && (
+        <ComparisonResults key={run.id} runId={run.id} />
+      )}
       {run?.dimensions && (
         <section className="panel">
           <div className="panel-title">
@@ -424,6 +452,11 @@ export function RecordsScreen() {
                       <small className="folder-label">
                         {r.question.folder}
                       </small>
+                      {r.generationModel && (
+                        <small className="folder-label">
+                          {r.generationModel}
+                        </small>
+                      )}
                     </td>
                     <td>
                       <span className="answer-preview">

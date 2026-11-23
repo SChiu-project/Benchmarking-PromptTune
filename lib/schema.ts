@@ -1,4 +1,9 @@
 import { z } from "zod";
+import {
+  modelIdSchema,
+  comparisonCaseSchema,
+  comparisonConfigSchema,
+} from "./comparison-contract";
 import { cmsAccessStateSchema } from "./cms-access-schema";
 import {
   criteriaSchema,
@@ -125,6 +130,9 @@ export const resultSchema = z.object({
   latencyMs: z.number().nonnegative(),
   rawRequest: z.unknown(),
   rawResponse: z.unknown(),
+  reportedModel: z.string().optional(),
+  answerSource: z.string().optional(),
+  modelVerification: z.enum(["matched", "mismatch", "unreported"]).optional(),
   promptVersion: z.record(z.string(), z.string()).optional(),
 });
 export type SearchResult = z.infer<typeof resultSchema>;
@@ -145,6 +153,7 @@ export const attemptSchema = z.object({
   dimensionSuite: dimensionSuiteResultSchema.optional(),
 });
 export const recordSchema = z.object({
+  generationModel: modelIdSchema.optional(),
   id: z.uuid(),
   runId: z.uuid(),
   question: questionSchema,
@@ -166,6 +175,9 @@ export const recordSchema = z.object({
 });
 export type RecordData = z.infer<typeof recordSchema>;
 export const configSchema = z.object({
+  generationModels: z.array(modelIdSchema).min(1).max(2).optional(),
+  evaluatorModel: modelIdSchema.optional(),
+  answerModel: modelIdSchema.optional(),
   endpoint: z.url(),
   projectId: z.string().min(1),
   timeoutMs: z.number().int().min(100).max(300000),
@@ -177,6 +189,8 @@ export const configSchema = z.object({
 });
 export type SearchConfig = z.infer<typeof configSchema>;
 export const runSchema = z.object({
+  comparisonConfig: comparisonConfigSchema.optional(),
+  comparisons: z.array(comparisonCaseSchema).max(1000).optional(),
   id: z.uuid(),
   idempotencyKey: z.uuid(),
   requestHash: z.string(),
@@ -211,6 +225,16 @@ export const createRunSchema = z
     promptSelection: promptSelectionSchema.optional(),
     promptDocumentFolder: z.string().trim().min(1).max(500).optional(),
     dimensions: dimensionSelectionSchema.optional(),
+    generationModels: z
+      .array(modelIdSchema)
+      .min(1)
+      .max(2)
+      .refine(
+        (v) => new Set(v).size === v.length,
+        "Choose different generation models.",
+      )
+      .optional(),
+    evaluatorModel: modelIdSchema.optional(),
   })
   .strict()
   .refine(
@@ -327,6 +351,20 @@ export function summarize(run: Run) {
     status: run.status,
     concurrency: run.concurrency,
     projectId: run.config.projectId,
+    generationModels: run.config.generationModels,
+    evaluatorModel:
+      run.config.evaluatorModel ??
+      run.campaign?.dimensions?.judge?.model ??
+      run.campaign?.evaluator?.model,
+    comparisonProgress: run.comparisons
+      ? {
+          total: run.comparisons.length,
+          completed: run.comparisons.filter(
+            (c) => !["pending", "running"].includes(c.status),
+          ).length,
+          failed: run.comparisons.filter((c) => c.status === "failed").length,
+        }
+      : undefined,
     promptSections: Object.keys(run.config.promptOverrides ?? {}),
     promptSource: run.config.promptProvenance
       ? {

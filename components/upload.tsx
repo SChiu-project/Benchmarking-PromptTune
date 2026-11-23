@@ -29,6 +29,7 @@ import { CriteriaEditor } from "./criteria-editor";
 import type { PromptSelection } from "@/lib/prompt-schema";
 import { promptCoversFolder } from "@/lib/schema";
 import { PromptEditor } from "./prompt-editor";
+import { ModelSelection } from "./model-selection";
 import { DimensionEditor } from "./dimension-editor";
 import type { DimensionSelectionInput } from "@/lib/dimension-contract";
 import {
@@ -41,6 +42,11 @@ import {
   date,
 } from "./common";
 export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
+  const [generationModels, setGenerationModels] = useState<
+    string[] | undefined
+  >();
+  const [evaluatorModel, setEvaluatorModel] = useState<string | undefined>();
+  const [modelsBlocked, setModelsBlocked] = useState(false);
   const maxMb = hosted ? 1 : 5;
   const router = useRouter(),
     input = useRef<HTMLInputElement>(null),
@@ -205,6 +211,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           question: testQuestion,
+          generationModels: generationModels?.slice(0, 1),
           projectId: projectId.trim(),
           promptOverrides,
           promptSelection,
@@ -235,6 +242,8 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
           promptSelection,
           promptDocumentFolder: promptActive ? promptFolder : undefined,
           dimensions: dimensionSelection,
+          generationModels,
+          evaluatorModel,
           idempotencyKey: submissionKey.current,
         }),
       });
@@ -252,6 +261,8 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     promptBlocked ||
     criteriaBlocked ||
     dimensionBlocked ||
+    modelsBlocked ||
+    (generationModels?.length === 2 && !configured) ||
     !projectId.trim() ||
     projectId.trim().length > 500 ||
     Boolean(review.errors.length) ||
@@ -592,6 +603,9 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                 onChange={(event) => {
                   projectInitialized.current = true;
                   setProjectId(event.target.value);
+                  setGenerationModels(undefined);
+                  setEvaluatorModel(undefined);
+                  setModelsBlocked(false);
                   setCriteriaQuestions(undefined);
                   setCriteriaBlocked(false);
                   setPromptOverrides(undefined);
@@ -668,6 +682,23 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
               </a>
               . Update the criteria project ID to match this run.
             </p>
+            <ModelSelection
+              key={`models-${projectId}`}
+              projectId={projectId.trim()}
+              disabled={testing || starting}
+              onChange={(models, evaluator, invalid) => {
+                setGenerationModels(models);
+                setEvaluatorModel(evaluator);
+                setModelsBlocked(invalid);
+                submissionKey.current = crypto.randomUUID();
+                setTest(null);
+                setTestId("");
+                setTestError("");
+              }}
+            />
+            {generationModels?.length === 2 && !configured && (
+              <ErrorBox message="Configure the evaluator endpoint, model and API key before starting a comparison." />
+            )}
             <CriteriaEditor
               key={`criteria-${promptEditorKey}`}
               questions={review.questions}
