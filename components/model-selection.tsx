@@ -1,5 +1,5 @@
 "use client";
-import { useRef, useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { api, ErrorBox } from "./common";
 import { CmsAccess } from "./cms-access";
 type Option = { id: string; name: string };
@@ -22,16 +22,43 @@ export function ModelSelection({
     [evaluator, setEvaluator] = useState("");
   const [generation, setGeneration] = useState<Option[]>([]),
     [judges, setJudges] = useState<Option[]>([]);
-  const [busy, setBusy] = useState(""),
+  const [authorized, setAuthorized] = useState(false),
+    [retry, setRetry] = useState(0),
+    [busy, setBusy] = useState(false),
     [generationError, setGenerationError] = useState(""),
     [judgeError, setJudgeError] = useState("");
-  const alive = useRef(true);
   useEffect(() => {
-    alive.current = true;
-    return () => {
-      alive.current = false;
-    };
-  }, []);
+    const abort = new AbortController();
+    async function load(kind: "generation" | "evaluator") {
+      const setError =
+        kind === "generation" ? setGenerationError : setJudgeError;
+      try {
+        const response = await api<{ models: Option[] }>(
+          `/api/models?${new URLSearchParams({ kind, projectId })}`,
+          { signal: abort.signal },
+        );
+        if (abort.signal.aborted) return;
+        if (kind === "generation") setGeneration(response.models);
+        else setJudges(response.models);
+        if (!response.models.length)
+          setError("No supported models are available in this catalog.");
+      } catch (error) {
+        if (!abort.signal.aborted) setError((error as Error).message);
+      }
+    }
+    void Promise.resolve().then(async () => {
+      if (abort.signal.aborted) return;
+      setGeneration([]);
+      setJudges([]);
+      setGenerationError("");
+      setJudgeError("");
+      setBusy(authorized && !!projectId);
+      if (!authorized || !projectId) return;
+      await Promise.all([load("generation"), load("evaluator")]);
+      if (!abort.signal.aborted) setBusy(false);
+    });
+    return () => abort.abort();
+  }, [authorized, projectId, retry]);
   function change(nextMode = mode, a = first, b = second, judge = evaluator) {
     setMode(nextMode);
     setFirst(a);
@@ -50,28 +77,21 @@ export function ModelSelection({
       invalid,
     );
   }
-  async function load(kind: "generation" | "evaluator") {
-    setBusy(kind);
-    const setError = kind === "generation" ? setGenerationError : setJudgeError;
-    setError("");
-    try {
-      const response = await api<{ models: Option[] }>(
-        `/api/models?${new URLSearchParams({ kind, projectId })}`,
-      );
-      if (!alive.current) return;
-      if (kind === "generation") setGeneration(response.models);
-      else setJudges(response.models);
-      if (!response.models.length)
-        setError("No supported models are available in this catalog.");
-    } catch (e) {
-      if (alive.current) setError((e as Error).message);
-    } finally {
-      if (alive.current) setBusy("");
-    }
-  }
   return (
     <section className="panel model-selection" aria-label="Benchmark models">
       <h3>Benchmark models</h3>
+      <CmsAccess
+        projectId={projectId}
+        disabled={disabled}
+        onAccessChange={setAuthorized}
+      />
+      <p className="muted" role="status">
+        {busy
+          ? "Loading CMS models and OpenRouter evaluators…"
+          : !authorized
+            ? "Connect to CMS to load generation and evaluation models automatically."
+            : "Model catalogs load automatically with CMS access."}
+      </p>
       <label>
         Generation mode{" "}
         <select
@@ -87,16 +107,6 @@ export function ModelSelection({
       </label>
       {mode !== "default" && (
         <>
-          <CmsAccess projectId={projectId} disabled={disabled} />
-          <button
-            type="button"
-            className="button secondary small"
-            disabled={disabled || !!busy || !projectId}
-            onClick={() => void load("generation")}
-          >
-            {busy === "generation" ? "Loading models…" : "Load models from CMS"}
-          </button>
-          <ErrorBox message={generationError} />
           <label>
             Generation model A{" "}
             <select
@@ -138,7 +148,7 @@ export function ModelSelection({
         <select
           aria-label="Evaluation model"
           value={evaluator}
-          disabled={disabled}
+          disabled={disabled || !judges.length}
           onChange={(e) => change(mode, first, second, e.target.value)}
         >
           <option value="">Use configured evaluator</option>
@@ -149,17 +159,18 @@ export function ModelSelection({
           ))}
         </select>
       </label>
-      <button
-        type="button"
-        className="button secondary small"
-        disabled={disabled || !!busy}
-        onClick={() => void load("evaluator")}
-      >
-        {busy === "evaluator"
-          ? "Loading evaluators…"
-          : "Load evaluators from OpenRouter"}
-      </button>
+      <ErrorBox message={generationError} />
       <ErrorBox message={judgeError} />
+      {authorized && (generationError || judgeError) && (
+        <button
+          type="button"
+          className="button secondary small"
+          disabled={disabled || busy}
+          onClick={() => setRetry((value) => value + 1)}
+        >
+          Retry loading model catalogs
+        </button>
+      )}
       <p className="muted">
         One evaluator grades both models and their comparisons. OpenRouter lists
         models with JSON output support; availability through your company proxy

@@ -21,6 +21,10 @@ type SessionStatus = {
   otpRequired: boolean;
   emailConfigured: boolean;
 };
+const sessionChanged = "cms-session-changed";
+function publishStatus(status: SessionStatus) {
+  window.dispatchEvent(new CustomEvent(sessionChanged, { detail: status }));
+}
 const post = (body: unknown) =>
   api<{ status?: string }>("/api/cms/session", {
     method: "POST",
@@ -43,16 +47,24 @@ export function CmsAccess({
   const [busy, setBusy] = useState(false);
   const [reconnect, setReconnect] = useState(false);
   async function refresh() {
-    setStatus(await api<SessionStatus>("/api/cms/session"));
+    publishStatus(await api<SessionStatus>("/api/cms/session"));
   }
   useEffect(() => {
     const abort = new AbortController();
+    const receiveStatus = (event: Event) => {
+      abort.abort();
+      setStatus((event as CustomEvent<SessionStatus>).detail);
+    };
+    window.addEventListener(sessionChanged, receiveStatus);
     api<SessionStatus>("/api/cms/session", { signal: abort.signal })
       .then(setStatus)
       .catch((e) => {
         if (!abort.signal.aborted) setError(e.message);
       });
-    return () => abort.abort();
+    return () => {
+      abort.abort();
+      window.removeEventListener(sessionChanged, receiveStatus);
+    };
   }, []);
   const pending = Boolean(
     status?.pending.some((a) => ["pending", "sending"].includes(a.status)),
@@ -66,7 +78,7 @@ export function CmsAccess({
         const next = await api<SessionStatus>("/api/cms/session", {
           signal: abort.signal,
         });
-        if (!abort.signal.aborted) setStatus(next);
+        if (!abort.signal.aborted) publishStatus(next);
       } catch {
         /* The explicit Check access button reports connectivity failures. */
       } finally {
