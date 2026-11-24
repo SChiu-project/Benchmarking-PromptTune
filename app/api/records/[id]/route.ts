@@ -1,3 +1,4 @@
+import { withLangfuseLink } from "@/lib/langfuse";
 import { readState } from "@/lib/store";
 import { fail, localRequest } from "@/lib/http";
 import { z } from "zod";
@@ -11,7 +12,11 @@ export async function GET(
     localRequest(req);
     const id = z.uuid().parse((await params).id),
       record = (await readState()).runs
-        .flatMap((r) => r.records)
+        .flatMap((r) =>
+          r.records.map((record) =>
+            withLangfuseLink(record, r.config.endpoint),
+          ),
+        )
         .find((r) => r.id === id);
     return record
       ? Response.json(record)

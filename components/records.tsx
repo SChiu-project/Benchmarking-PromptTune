@@ -1,4 +1,5 @@
 "use client";
+import { TraceLink } from "./trace-link";
 import { useEffect, useState } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import Link from "next/link";
@@ -475,7 +476,10 @@ export function RecordsScreen() {
                             : "—"}
                         </code>
                         {r.result?.traceId && (
-                          <CopyButton text={r.result.traceId} />
+                          <>
+                            <CopyButton text={r.result.traceId} />
+                            <TraceLink url={r.result.traceUrl} compact />
+                          </>
                         )}
                       </span>
                     </td>
@@ -873,7 +877,10 @@ export function RecordsScreen() {
                       {detail.result?.traceId || "Trace ID unavailable"}
                     </code>
                     {detail.result?.traceId && (
-                      <CopyButton text={detail.result.traceId} />
+                      <>
+                        <CopyButton text={detail.result.traceId} />
+                        <TraceLink url={detail.result.traceUrl} />
+                      </>
                     )}
                   </div>
                   {detail.result?.promptVersion && (

@@ -1,4 +1,5 @@
 "use client";
+import { TraceLink } from "./trace-link";
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
@@ -814,7 +815,10 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
                     Trace ID:{" "}
                     <code>{test.result?.traceId || "Unavailable"}</code>
                     {test.result?.traceId && (
-                      <CopyButton text={test.result.traceId} />
+                      <>
+                        <CopyButton text={test.result.traceId} />
+                        <TraceLink url={test.result.traceUrl} />
+                      </>
                     )}
                   </div>
                   {test.result?.promptVersion && (

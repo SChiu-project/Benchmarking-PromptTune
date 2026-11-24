@@ -1,3 +1,4 @@
+import { withLangfuseLink } from "./langfuse";
 import { recordSummary } from "./http";
 import type { State } from "./schema";
 export function listRecords(state: State, params: URLSearchParams) {
@@ -8,7 +9,9 @@ export function listRecords(state: State, params: URLSearchParams) {
         (!params.get("run") || r.id === params.get("run")),
     )
     .reverse()
-    .flatMap((r) => r.records);
+    .flatMap((r) =>
+      r.records.map((record) => withLangfuseLink(record, r.config.endpoint)),
+    );
   const folders = [...new Set(scope.map((r) => r.question.folder))].sort();
   const filtered = scope.filter(
     (r) =>

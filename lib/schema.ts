@@ -127,6 +127,7 @@ export const resultSchema = z.object({
   answer: z.string(),
   sources: z.array(sourceSchema).nullable(),
   traceId: z.string().nullable(),
+  traceUrl: z.url().optional(),
   latencyMs: z.number().nonnegative(),
   rawRequest: z.unknown(),
   rawResponse: z.unknown(),

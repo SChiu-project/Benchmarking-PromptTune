@@ -1,3 +1,4 @@
+import { langfuseTraceUrl } from "./langfuse";
 import { z } from "zod";
 import {
   promptCoversFolder,
@@ -140,6 +141,7 @@ export async function search(
     const adapted = adaptResponse(raw);
     return {
       ...adapted,
+      traceUrl: langfuseTraceUrl(adapted.traceId, c.endpoint) ?? undefined,
       ...(c.answerModel
         ? {
             modelVerification: adapted.reportedModel
