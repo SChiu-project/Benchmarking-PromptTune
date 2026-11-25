@@ -1,6 +1,6 @@
 # UI revamp work plan: garden study (Workbook v3.0)
 
-**Status:** Draft, 2026-11-25
+**Status:** Implemented 2026-11-25 on branch `ui-garden-revamp` (D1–D5 taken as recommended). Open follow-ups: remove the rotating-art flag after one release; recheck 200% zoom in a real browser.
 **Source of truth:** `UI_DESIGN_WORKBOOK.html` v3.0 ("Garden · Brabant · Clichy")
 **Replaces:** the ivory/blue look described in `UI_HANDBOOK.md` (that theme stays in the handbook as Appendix A)
 
