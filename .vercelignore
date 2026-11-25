@@ -17,3 +17,7 @@ reports
 test-results
 playwright-report
 *.tsbuildinfo
+
+# Design references (not product assets).
+impressionst_ref
+UI_DESIGN_WORKBOOK.html

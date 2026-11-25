@@ -226,7 +226,7 @@ export function DimensionEditor({
                     }
                   />{" "}
                   {DIMENSION_LABELS[name]}
-                  {edited && <span className="badge running">Modified</span>}
+                  {edited && <span className="badge active">Modified</span>}
                 </label>
                 {selected && (
                   <>

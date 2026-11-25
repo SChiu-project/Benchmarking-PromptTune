@@ -65,6 +65,7 @@ export function ComparisonResults({ runId }: { runId: string }) {
       <div className="panel-title">
         <h2>Model comparison</h2>
         <button
+          type="button"
           className="button secondary small"
           disabled={busy || !data || data.status === "active"}
           onClick={() => void retry()}
@@ -72,129 +73,141 @@ export function ComparisonResults({ runId }: { runId: string }) {
           Re-evaluate comparisons
         </button>
       </div>
-      <ErrorBox message={error} />
-      {data && (
-        <>
-          <p>
-            Model A: <strong>{data.models[0]}</strong> · Model B:{" "}
-            <strong>{data.models[1]}</strong>
+      <div className="panel-body">
+        <ErrorBox message={error} />
+        {!data && !error && (
+          <p role="status" className="muted">
+            Loading comparisons…
           </p>
-          <p className="muted">
-            Evaluator: {data.config.judge.model} · Draft rubric ·{" "}
-            {data.completed} / {data.total} comparisons finished. Each model
-            uses its own retrieved passages.
-          </p>
-          {data.cases.map((pair) => (
-            <details key={pair.id} className="comparison-case">
-              <summary>
-                {pair.records[0].question.query} ·{" "}
-                {pair.records[0].question.folder} <Badge value={pair.status} />
-              </summary>
-              {pair.reason && <ErrorBox message={pair.reason} />}
-              <div className="comparison-answers">
-                {pair.records.map((r, i) => (
-                  <div key={r.id}>
-                    <h3>
-                      Model {i === 0 ? "A" : "B"}: {r.generationModel}
-                    </h3>
-                    <p className="muted">
-                      Generation: {r.execution} · Grading: {r.evaluationStatus}{" "}
-                      · Reported model:{" "}
-                      {r.result?.reportedModel ?? "unreported"} · Match:{" "}
-                      {r.result?.modelVerification ?? "unreported"}
-                    </p>
-                    {r.result?.answerSource && (
+        )}
+        {data && (
+          <>
+            <p>
+              Model A: <strong>{data.models[0]}</strong> · Model B:{" "}
+              <strong>{data.models[1]}</strong>
+            </p>
+            <p className="muted">
+              Evaluator: {data.config.judge.model} · Draft rubric ·{" "}
+              {data.completed} / {data.total} comparisons finished. Each model
+              uses its own retrieved passages.
+            </p>
+            {data.cases.map((pair) => (
+              <details key={pair.id} className="comparison-case">
+                <summary>
+                  {pair.records[0].question.query} ·{" "}
+                  {pair.records[0].question.folder}{" "}
+                  <Badge value={pair.status} />
+                </summary>
+                {pair.reason && <ErrorBox message={pair.reason} />}
+                <div className="comparison-answers">
+                  {pair.records.map((r, i) => (
+                    <div key={r.id}>
+                      <h3>
+                        Model {i === 0 ? "A" : "B"}: {r.generationModel}
+                      </h3>
                       <p className="muted">
-                        Answer source: {r.result.answerSource}
+                        Generation: {r.execution} · Grading:{" "}
+                        {r.evaluationStatus} · Reported model:{" "}
+                        {r.result?.reportedModel ?? "unreported"} · Match:{" "}
+                        {r.result?.modelVerification ?? "unreported"}
                       </p>
-                    )}
-                    <p className="comparison-answer">
-                      {r.result?.answer ?? r.error ?? "Waiting for an answer…"}
-                    </p>
-                    {r.evaluation && (
-                      <EvaluationScore evaluation={r.evaluation} />
-                    )}
-                    {r.dimensionSuite && (
-                      <DimensionEvidence suite={r.dimensionSuite} />
-                    )}
-                  </div>
-                ))}
-              </div>
-              {pair.attempts.length > 0 && (
-                <p className="muted">
-                  In the judge’s reasons, A refers to{" "}
-                  {
-                    pair.records[pair.attempts.at(-1)!.swapped ? 1 : 0]
-                      .generationModel
-                  }
-                  ; B refers to{" "}
-                  {
-                    pair.records[pair.attempts.at(-1)!.swapped ? 0 : 1]
-                      .generationModel
-                  }
-                  . Answer order was randomized.
-                </p>
-              )}
-              <div className="table-wrap">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Dimension</th>
-                      <th>Comparison result</th>
-                      <th>Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {pair.rows?.map((r) => (
-                      <tr key={r.name}>
-                        <td>{DIMENSION_LABELS[r.name]}</td>
-                        <td>
-                          {r.preferred === "first"
-                            ? "A better"
-                            : r.preferred === "second"
-                              ? "B better"
-                              : r.preferred === "tie"
-                                ? "Tie"
-                                : "Unassessable"}
-                        </td>
-                        <td>{r.reason}</td>
-                      </tr>
-                    ))}
-                    {!pair.rows && (
+                      {r.result?.answerSource && (
+                        <p className="muted">
+                          Answer source: {r.result.answerSource}
+                        </p>
+                      )}
+                      <p className="comparison-answer">
+                        {r.result?.answer ??
+                          r.error ??
+                          "Waiting for an answer…"}
+                      </p>
+                      {r.evaluation && (
+                        <EvaluationScore evaluation={r.evaluation} />
+                      )}
+                      {r.dimensionSuite && (
+                        <DimensionEvidence suite={r.dimensionSuite} />
+                      )}
+                    </div>
+                  ))}
+                </div>
+                {pair.attempts.length > 0 && (
+                  <p className="muted">
+                    In the judge’s reasons, A refers to{" "}
+                    {
+                      pair.records[pair.attempts.at(-1)!.swapped ? 1 : 0]
+                        .generationModel
+                    }
+                    ; B refers to{" "}
+                    {
+                      pair.records[pair.attempts.at(-1)!.swapped ? 0 : 1]
+                        .generationModel
+                    }
+                    . Answer order was randomized.
+                  </p>
+                )}
+                <div className="table-wrap">
+                  <table>
+                    <thead>
                       <tr>
-                        <td colSpan={3}>
-                          {pair.reason ?? `Comparison ${pair.status}`}
-                        </td>
+                        <th scope="col">Dimension</th>
+                        <th scope="col">Comparison result</th>
+                        <th scope="col">Reason</th>
                       </tr>
-                    )}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {pair.rows?.map((r) => (
+                        <tr key={r.name}>
+                          <td>{DIMENSION_LABELS[r.name]}</td>
+                          <td>
+                            {r.preferred === "first"
+                              ? "A better"
+                              : r.preferred === "second"
+                                ? "B better"
+                                : r.preferred === "tie"
+                                  ? "Tie"
+                                  : "Unassessable"}
+                          </td>
+                          <td>{r.reason}</td>
+                        </tr>
+                      ))}
+                      {!pair.rows && (
+                        <tr>
+                          <td colSpan={3}>
+                            {pair.reason ?? `Comparison ${pair.status}`}
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </details>
+            ))}
+            {data.pages > 1 && (
+              <div className="pagination">
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={page <= 1}
+                  onClick={() => setPage(page - 1)}
+                >
+                  Previous
+                </button>
+                <span>
+                  Page {page} / {data.pages}
+                </span>
+                <button
+                  type="button"
+                  className="button secondary small"
+                  disabled={page >= data.pages}
+                  onClick={() => setPage(page + 1)}
+                >
+                  Next
+                </button>
               </div>
-            </details>
-          ))}
-          {data.pages > 1 && (
-            <div className="pagination">
-              <button
-                className="button secondary small"
-                disabled={page <= 1}
-                onClick={() => setPage(page - 1)}
-              >
-                Previous
-              </button>
-              <span>
-                Page {page} / {data.pages}
-              </span>
-              <button
-                className="button secondary small"
-                disabled={page >= data.pages}
-                onClick={() => setPage(page + 1)}
-              >
-                Next
-              </button>
-            </div>
-          )}
-        </>
-      )}
+            )}
+          </>
+        )}
+      </div>
     </section>
   );
 }

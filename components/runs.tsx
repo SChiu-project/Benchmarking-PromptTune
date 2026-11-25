@@ -4,7 +4,14 @@ import Link from "next/link";
 import { PageHeading } from "./page-heading";
 import { startPolling } from "../lib/polling";
 import { useRouter } from "next/navigation";
-import { Plus, Layers3, Activity, CheckCircle2, Target } from "lucide-react";
+import {
+  Plus,
+  Layers3,
+  Activity,
+  CheckCircle2,
+  Target,
+  AlertTriangle,
+} from "lucide-react";
 import type { RunSummary } from "@/lib/schema";
 import type { DimensionSelectionInput } from "@/lib/dimension-contract";
 import { DimensionEditor } from "./dimension-editor";
@@ -13,6 +20,9 @@ export function RunsScreen() {
   const router = useRouter();
   const [runs, setRuns] = useState<RunSummary[]>([]),
     [loading, setLoading] = useState(true),
+    // `loaded` separates "no runs yet" from "the request failed".
+    [loaded, setLoaded] = useState(false),
+    [attempt, setAttempt] = useState(0),
     [error, setError] = useState(""),
     [regradeId, setRegradeId] = useState(""),
     [regradeSelection, setRegradeSelection] = useState<
@@ -29,6 +39,7 @@ export function RunsScreen() {
             if (live) {
               setRuns(r);
               setLoading(false);
+              setLoaded(true);
               setError("");
             }
             return r.some((run) => run.status === "active") ? 1500 : 30000;
@@ -46,7 +57,15 @@ export function RunsScreen() {
       live = false;
       stop();
     };
-  }, []);
+  }, [attempt]);
+  function retryLoad() {
+    setError("");
+    setLoading(true);
+    setAttempt((n) => n + 1);
+  }
+  const sum = (pick: (r: RunSummary) => number) =>
+    runs.reduce((n, r) => n + pick(r), 0);
+  const unavailable = !loaded;
   async function submitRegrade() {
     if (!regradeId || regrading) return;
     setRegrading(true);
@@ -67,7 +86,7 @@ export function RunsScreen() {
   return (
     <>
       <PageHeading
-        eyebrow="YOUR BENCHMARK HISTORY"
+        eyebrow="Your benchmark history"
         title="Benchmark runs"
         description="Follow execution, measure quality, and find what needs attention."
         action={
@@ -76,45 +95,78 @@ export function RunsScreen() {
           </Link>
         }
       />
-      <ErrorBox message={error} />
+      <ErrorBox message={loaded && !regradeId ? error : ""} />
       <div className="metric-grid">
         {[
-          { label: "Total runs", value: runs.length, icon: Layers3 },
+          {
+            label: "Total runs",
+            value: runs.length,
+            sub: "all time",
+            icon: Layers3,
+          },
           {
             label: "Active runs",
             value: runs.filter((r) => r.status === "active").length,
+            sub: "running now",
             icon: Activity,
           },
           {
             label: "Successful answers",
-            value: runs.reduce((n, r) => n + r.searchSucceeded, 0),
+            value: sum((r) => r.searchSucceeded),
+            sub: `of ${sum((r) => r.total).toLocaleString()} questions`,
             icon: CheckCircle2,
           },
           {
             label: "Cases needing review",
-            value: runs.reduce((n, r) => n + r.review, 0),
+            value: sum((r) => r.review),
+            sub: `of ${sum((r) => r.evaluated).toLocaleString()} graded`,
             icon: Target,
           },
         ].map((m) => (
           <div className="panel metric" key={m.label}>
             <span>
               {m.label}
-              <m.icon size={17} />
+              <m.icon size={17} aria-hidden="true" />
             </span>
-            <strong>{loading ? "—" : m.value}</strong>
+            <strong>{unavailable ? "—" : m.value.toLocaleString()}</strong>
+            <small>
+              {loading && unavailable
+                ? "Loading…"
+                : unavailable
+                  ? "Unavailable"
+                  : m.sub}
+            </small>
           </div>
         ))}
       </div>
       <section className="panel">
         <div className="panel-title">
           <h2>All runs</h2>
-          <span className="muted">
-            {runs.length} batch{runs.length === 1 ? "" : "es"}
-          </span>
+          {loaded && (
+            <span className="muted">
+              {runs.length} batch{runs.length === 1 ? "" : "es"}
+            </span>
+          )}
         </div>
-        {loading ? (
+        {loading && unavailable ? (
           <div role="status" className="empty-state">
             Loading runs…
+          </div>
+        ) : unavailable ? (
+          <div className="empty-state failed">
+            <AlertTriangle size={28} aria-hidden="true" />
+            <h3>Couldn’t load runs</h3>
+            <p>
+              {error || "The request failed."} Check that the workspace is
+              running, then retry.
+            </p>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={retryLoad}
+            >
+              Retry
+            </button>
           </div>
         ) : !runs.length ? (
           <div className="empty-state">
@@ -184,10 +236,11 @@ export function RunsScreen() {
                     <td>
                       <strong className="score">{percent(r.passRate)}</strong>
                       <small>
-                        {r.passed} pass · {r.failed} fail
+                        {r.passed} of {r.passed + r.failed} eligible passed
                       </small>
                       <small>
                         {r.review} review · {r.unassessable} unassessable
+                        excluded
                       </small>
                       {r.mixedEvaluationVersions && (
                         <small className="evaluation-caution">
@@ -199,7 +252,7 @@ export function RunsScreen() {
                       <strong className="coverage-value">
                         {percent(r.evaluationCoverage)}
                       </strong>
-                      <small>Requirement coverage</small>
+                      <small>Requirement coverage of {r.total} records</small>
                       {r.criticalFailures > 0 && (
                         <small className="error-text">
                           {r.criticalFailures} critical failures
@@ -211,7 +264,10 @@ export function RunsScreen() {
                         </small>
                       )}
                     </td>
-                    <td>{latency(r.averageLatency)}</td>
+                    <td>
+                      {latency(r.averageLatency)}
+                      <small>{r.searchSucceeded} successful requests</small>
+                    </td>
                     <td>
                       <details className="run-breakdown">
                         <summary>
@@ -253,7 +309,10 @@ export function RunsScreen() {
                           </div>
                           <div>
                             <dt>Operational success</dt>
-                            <dd>{percent(r.operationalSuccessRate)}</dd>
+                            <dd>
+                              {percent(r.operationalSuccessRate)} ·{" "}
+                              {r.searchSucceeded} of {r.total} records
+                            </dd>
                           </div>
                           {r.mixedEvaluationVersions && (
                             <div>
@@ -277,6 +336,7 @@ export function RunsScreen() {
                           )}
                         </dl>
                         <button
+                          type="button"
                           className="button secondary small"
                           disabled={runs.some((r) => r.status === "active")}
                           onClick={() => {

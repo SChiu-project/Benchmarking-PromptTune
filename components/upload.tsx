@@ -51,6 +51,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
   const maxMb = hosted ? 1 : 5;
   const router = useRouter(),
     input = useRef<HTMLInputElement>(null),
+    chooseButton = useRef<HTMLButtonElement>(null),
     submitting = useRef(false),
     submissionKey = useRef(""),
     projectInitialized = useRef(false);
@@ -63,6 +64,8 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
     [starting, setStarting] = useState(false),
     [drag, setDrag] = useState(false),
     [recent, setRecent] = useState<RunSummary[]>([]),
+    // null while loading, false when the request failed, true once loaded.
+    [recentLoaded, setRecentLoaded] = useState<boolean | null>(null),
     [activeRun, setActiveRun] = useState<RunSummary | null>(null),
     [configured, setConfigured] = useState<boolean | null>(null),
     [projectId, setProjectId] = useState(""),
@@ -110,10 +113,14 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
           }
           setActiveRun(status.value.activeRun);
           setRecent(runs.value.slice(0, 3));
+          setRecentLoaded(true);
         }
         return status.value.activeRun ? 2500 : 30000;
       } catch (error) {
-        if (live) setError((error as Error).message);
+        if (live) {
+          setError((error as Error).message);
+          setRecentLoaded((loaded) => loaded || false);
+        }
         return false;
       }
     }, 2500);
@@ -278,6 +285,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
       )}{" "}
       {hosted && !activeRun.workflowRunId && (
         <button
+          type="button"
           className="button secondary small"
           onClick={() =>
             void api(`/api/runs/${activeRun.id}/dispatch`, {
@@ -290,6 +298,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
       )}{" "}
       {activeRun.workflowRunId && (
         <button
+          type="button"
           className="button secondary small"
           onClick={() =>
             void api(`/api/runs/${activeRun.id}/recover`, {
@@ -305,7 +314,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
   return (
     <>
       <PageHeading
-        eyebrow="BUILD CONFIDENCE IN EVERY ANSWER"
+        eyebrow="Build confidence in every answer"
         title="A clearer picture of answer quality."
         description="Upload your questions, run a benchmark, and discover where answers can improve."
       />
@@ -355,6 +364,8 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
               }}
             />
             <button
+              ref={chooseButton}
+              type="button"
               className="button primary"
               disabled={loading}
               onClick={() => input.current?.click()}
@@ -380,7 +391,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
           </div>
         </section>
         <aside className="panel format-panel">
-          <div className="card-kicker">QUICK REFERENCE</div>
+          <div className="card-kicker">Quick reference</div>
           <h2>A simple CSV. A powerful benchmark.</h2>
           <p className="muted">
             One question per row. Add a reference to measure fulfillment.
@@ -464,17 +475,36 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
             View all runs <ArrowRight size={15} />
           </Link>
         </div>
-        {recent.length ? (
-          <div className="panel table-wrap">
+        {recentLoaded === null ? (
+          <div className="panel recent-empty" role="status">
+            <p>Loading recent runs…</p>
+          </div>
+        ) : recentLoaded === false ? (
+          <div className="panel recent-empty">
+            <h3>Couldn’t load recent runs</h3>
+            <p>
+              The workspace didn’t respond. Reload the page to try again; your
+              runs are not affected.
+            </p>
+          </div>
+        ) : recent.length ? (
+          <div
+            className="panel table-wrap"
+            role="region"
+            aria-label="Recent runs"
+            tabIndex={0}
+          >
             <table>
               <thead>
                 <tr>
-                  <th>Run</th>
-                  <th>Status</th>
-                  <th>Questions</th>
-                  <th>Progress</th>
-                  <th>Created</th>
-                  <th aria-label="Open" />
+                  <th scope="col">Run</th>
+                  <th scope="col">Status</th>
+                  <th scope="col">Questions</th>
+                  <th scope="col">Progress</th>
+                  <th scope="col">Created</th>
+                  <th scope="col">
+                    <span className="sr-only">Open</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
@@ -514,7 +544,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
             <span className="empty-icon">
               <Layers3 size={24} />
             </span>
-            <h3>Your first benchmark starts here</h3>
+            <h3>No runs yet</h3>
             <p>Upload a CSV to see your runs and results in one place.</p>
           </div>
         )}
@@ -542,6 +572,7 @@ export function UploadScreen({ hosted = false }: { hosted?: boolean }) {
         <Modal
           title="Review your questions"
           subtitle={fileName}
+          returnFocus={chooseButton}
           onClose={() => {
             if (!starting) setReview(null);
           }}
