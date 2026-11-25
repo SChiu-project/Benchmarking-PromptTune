@@ -4,10 +4,10 @@ import type {
 } from "@/lib/dimension-contract";
 import type { RunSummary } from "@/lib/schema";
 import { DIMENSION_LABELS } from "./dimension-editor";
-import { percent, date } from "./common";
+import { Badge, percent, date } from "./common";
 
 function StatusBadge({ status }: { status: DimensionRow["status"] }) {
-  return <span className={`badge dim-${status}`}>{status.replaceAll("_", " ")}</span>;
+  return <Badge value={status} />;
 }
 export function DimensionScore({ suite }: { suite?: DimensionSuiteResult }) {
   if (!suite) return null;
@@ -24,7 +24,7 @@ export function DimensionScore({ suite }: { suite?: DimensionSuiteResult }) {
 }
 function RowEvidence({ row }: { row: DimensionRow }) {
   return (
-    <details onClick={(e) => e.stopPropagation()}>
+    <details>
       <summary>Evidence</summary>
       {row.passages && (
         <ul>

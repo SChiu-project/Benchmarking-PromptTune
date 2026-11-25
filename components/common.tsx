@@ -2,13 +2,29 @@
 import { useEffect, useRef, useState, useId } from "react";
 import { X, Copy, Check } from "lucide-react";
 export { api } from "../lib/api-client";
+export type BadgeTone = "success" | "active" | "warning" | "danger" | "neutral";
+// Statuses are designed explicitly; anything not listed renders neutral.
+const badgeTones: Record<string, BadgeTone> = {
+  succeeded: "success",
+  completed: "success",
+  pass: "success",
+  active: "active",
+  running: "active",
+  queued: "warning",
+  pending: "warning",
+  review: "warning",
+  failed: "danger",
+  fail: "danger",
+  interrupted: "danger",
+  error: "danger",
+};
+export const badgeTone = (value: string): BadgeTone =>
+  badgeTones[value] ?? "neutral";
+export const statusLabel = (value: string) =>
+  value.replaceAll("_", " ").replace(/^./, (s) => s.toUpperCase());
 export function Badge({ value }: { value: string }) {
   return (
-    <span className={`badge ${value}`}>
-      {value === "succeeded"
-        ? "Succeeded"
-        : value.replaceAll("_", " ").replace(/^./, (s) => s.toUpperCase())}
-    </span>
+    <span className={`badge ${badgeTone(value)}`}>{statusLabel(value)}</span>
   );
 }
 export const latency = (n: number | null | undefined) =>
@@ -49,11 +65,15 @@ export function Modal({
   subtitle,
   children,
   onClose,
+  returnFocus,
 }: {
   title: string;
   subtitle?: string;
   children: React.ReactNode;
   onClose: () => void;
+  /** Where focus goes on close when the opener can't take it back (e.g. it
+   * was disabled while the dialog loaded). */
+  returnFocus?: React.RefObject<HTMLElement | null>;
 }) {
   const headingId = useId(),
     descriptionId = useId();
@@ -64,10 +84,17 @@ export function Modal({
       previous = document.activeElement as HTMLElement | null;
     dialog.showModal();
     close.current?.focus();
+    const fallback = returnFocus?.current;
     return () => {
       dialog.close();
-      previous?.focus();
+      const target =
+        previous && previous !== document.body && previous.isConnected
+          ? previous
+          : fallback;
+      target?.focus();
     };
+    // Focus handling runs once per dialog lifetime.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   return (
     <dialog

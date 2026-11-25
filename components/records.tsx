@@ -12,6 +12,7 @@ import {
   ArrowLeft,
   RefreshCw,
   ExternalLink,
+  AlertTriangle,
 } from "lucide-react";
 import type { RecordData, RunSummary } from "@/lib/schema";
 import { ComparisonResults } from "./comparison-results";
@@ -65,6 +66,9 @@ export function RecordsScreen() {
     [decision, setDecision] = useState(""),
     [query, setQuery] = useState(""),
     [loading, setLoading] = useState(true),
+    // `loaded` separates "no records" from "the request failed".
+    [loaded, setLoaded] = useState(false),
+    [attempt, setAttempt] = useState(0),
     [error, setError] = useState(""),
     [detailId, setDetailId] = useState(""),
     [detail, setDetail] = useState<RecordData | null>(null),
@@ -99,6 +103,7 @@ export function RecordsScreen() {
           setFolders(rs.value.folders);
           setRuns(rr.value);
           setLoading(false);
+          setLoaded(true);
           setError("");
         }
         return rr.value.some((run) => run.status === "active") ? 1500 : 30000;
@@ -114,7 +119,7 @@ export function RecordsScreen() {
       live = false;
       stop();
     };
-  }, [runId, folder, execution, evaluation, decision, query, page]);
+  }, [runId, folder, execution, evaluation, decision, query, page, attempt]);
   useEffect(() => {
     if (!detailId) return;
     let live = true;
@@ -159,6 +164,14 @@ export function RecordsScreen() {
     }
   }
   const filtered = records;
+  const filtering = Boolean(
+    folder || execution || evaluation || decision || query,
+  );
+  function retryLoad() {
+    setError("");
+    setLoading(true);
+    setAttempt((n) => n + 1);
+  }
   const run = runs.find((r) => r.id === runId);
   function open(id: string) {
     setRegradeQuestions(undefined);
@@ -170,7 +183,7 @@ export function RecordsScreen() {
   return (
     <>
       <PageHeading
-        eyebrow="EVERY ANSWER, IN CONTEXT"
+        eyebrow="Every answer, in context"
         title="Answer records"
         description="Inspect responses, trace their sources, and see what’s missing."
         action={
@@ -179,11 +192,12 @@ export function RecordsScreen() {
           </Link>
         }
       />
-      <ErrorBox message={error} />
+      <ErrorBox message={loaded ? error : ""} />
       {run?.dispatchError && (
         <div className="alert warning">
           {run.dispatchError}{" "}
           <button
+            type="button"
             className="button secondary small"
             onClick={() =>
               void api(`/api/runs/${run.id}/dispatch`, {
@@ -222,6 +236,7 @@ export function RecordsScreen() {
             </span>
             {run.workflowRunId && run.status === "active" && (
               <button
+                type="button"
                 className="button secondary small"
                 onClick={() =>
                   void api(`/api/runs/${run.id}/recover`, {
@@ -238,11 +253,13 @@ export function RecordsScreen() {
             </span>
             <span>
               {run.passed} pass · {run.failed} fail · {run.review} review ·{" "}
-              {run.criticalFailures} critical failures
+              {run.unassessable} unassessable · {run.criticalFailures} critical
+              failures
             </span>
             <span>
-              Coverage {percent(run.evaluationCoverage)} · Pass rate{" "}
-              {percent(run.passRate)}
+              Pass rate {percent(run.passRate)} ({run.passed} of{" "}
+              {run.passed + run.failed} eligible) · Coverage{" "}
+              {percent(run.evaluationCoverage)} of {run.total} records
             </span>
           </div>
           <progress
@@ -374,9 +391,6 @@ export function RecordsScreen() {
               ),
             )}
           </select>
-        </div>
-        <label>
-          Decision{" "}
           <select
             aria-label="Filter by decision"
             value={decision}
@@ -390,63 +404,82 @@ export function RecordsScreen() {
             <option value="fail">Fail</option>
             <option value="review">Review</option>
           </select>
-        </label>
-        <div className="record-count">
-          {total} matching record{total === 1 ? "" : "s"}
-          <span>Updates automatically</span>
         </div>
-        {loading ? (
+        {loaded && (
+          <div className="record-count" role="status">
+            {total} matching record{total === 1 ? "" : "s"}
+            <span>Updates automatically</span>
+          </div>
+        )}
+        {loading && !loaded ? (
           <div className="empty-state" role="status">
             Loading records…
           </div>
+        ) : !loaded ? (
+          <div className="empty-state failed">
+            <AlertTriangle size={28} aria-hidden="true" />
+            <h3>Couldn’t load records</h3>
+            <p>
+              {error || "The request failed."} Check that the workspace is
+              running, then retry.
+            </p>
+            <button
+              type="button"
+              className="button secondary"
+              onClick={retryLoad}
+            >
+              Retry
+            </button>
+          </div>
         ) : !filtered.length ? (
           <div className="empty-state">
-            <Rows3 size={28} />
-            <h3>{records.length ? "No matching records" : "No records yet"}</h3>
+            <Rows3 size={28} aria-hidden="true" />
+            <h3>{filtering ? "No matching records" : "No records yet"}</h3>
             <p>
-              {records.length
+              {filtering
                 ? "Try a different filter or search."
                 : "Upload a CSV and start a batch to inspect responses."}
             </p>
-            {!records.length && (
+            {!filtering && (
               <Link className="button secondary" href="/">
                 Upload questions
               </Link>
             )}
           </div>
         ) : (
-          <div className="table-wrap">
+          <div
+            className="table-wrap"
+            role="region"
+            aria-label="Answer records"
+            tabIndex={0}
+          >
             <table className="records-table">
               <thead>
                 <tr>
-                  <th>Question / Folder</th>
-                  <th>Answer</th>
-                  <th>
+                  <th scope="col">Question / Folder</th>
+                  <th scope="col">Answer</th>
+                  <th scope="col">
                     Sources<small>passages</small>
                   </th>
-                  <th>Latency</th>
-                  <th>Trace ID</th>
-                  <th>Doc Search</th>
-                  <th>Evaluation</th>
-                  <th>Fulfillment</th>
-                  <th>Why this score</th>
-                  <th aria-label="Details" />
+                  <th scope="col">Latency</th>
+                  <th scope="col">Trace ID</th>
+                  <th scope="col">Doc Search</th>
+                  <th scope="col">Evaluation</th>
+                  <th scope="col">Fulfillment</th>
+                  <th scope="col">Why this score</th>
+                  <th scope="col">
+                    <span className="sr-only">Details</span>
+                  </th>
                 </tr>
               </thead>
               <tbody>
                 {filtered.map((r) => (
-                  <tr
-                    key={r.id}
-                    onClick={() => open(r.id)}
-                    className="clickable"
-                  >
+                  <tr key={r.id}>
                     <td>
                       <button
-                        className="query-button"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          open(r.id);
-                        }}
+                        type="button"
+                        className="query-button link-button"
+                        onClick={() => open(r.id)}
                       >
                         {r.question.query}
                       </button>
@@ -513,7 +546,7 @@ export function RecordsScreen() {
                           {r.evaluation && (
                             <>
                               <p>{r.evaluation.assessment}</p>
-                              <details onClick={(e) => e.stopPropagation()}>
+                              <details>
                                 <summary>Score breakdown</summary>
                                 <RequirementEvidence
                                   evaluation={r.evaluation}
@@ -551,7 +584,7 @@ export function RecordsScreen() {
                             </>
                           )}
                           {r.dimensionSuite && (
-                            <details onClick={(e) => e.stopPropagation()}>
+                            <details>
                               <summary>
                                 Dimension results (
                                 {r.dimensionSuite.counts.passed}/
@@ -573,7 +606,14 @@ export function RecordsScreen() {
                       )}
                     </td>
                     <td>
-                      <ChevronRight size={15} />
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Open details for “${r.question.query.slice(0, 60)}”`}
+                        onClick={() => open(r.id)}
+                      >
+                        <ChevronRight size={16} aria-hidden="true" />
+                      </button>
                     </td>
                   </tr>
                 ))}
@@ -585,6 +625,7 @@ export function RecordsScreen() {
       {pages > 1 && (
         <div className="pagination">
           <button
+            type="button"
             className="button secondary small"
             disabled={page <= 1}
             onClick={() => setPage((p) => p - 1)}
@@ -595,6 +636,7 @@ export function RecordsScreen() {
             Page {Math.min(page, pages)} of {pages}
           </span>
           <button
+            type="button"
             className="button secondary small"
             disabled={page >= pages}
             onClick={() => setPage((p) => p + 1)}
@@ -632,27 +674,27 @@ export function RecordsScreen() {
                 </div>
                 <section>
                   <div className="detail-label">
-                    QUESTION <span>{detail.question.folder}</span>
+                    Question <span>{detail.question.folder}</span>
                   </div>
                   <h3 className="preserve full-query">
                     {detail.question.query}
                   </h3>
                 </section>
                 <section className="answer-block">
-                  <div className="detail-label">DOC SEARCH ANSWER</div>
+                  <div className="detail-label">Doc Search answer</div>
                   <p className="preserve">
                     {detail.result?.answer || "No answer available."}
                   </p>
                 </section>
                 <div className="criteria-grid">
                   <section>
-                    <div className="detail-label">EXPECTED ANSWER</div>
+                    <div className="detail-label">Expected answer</div>
                     <p className="preserve">
                       {detail.question.expected_answer || "Not supplied."}
                     </p>
                   </section>
                   <section>
-                    <div className="detail-label">EVALUATION COMMENTS</div>
+                    <div className="detail-label">Evaluation comments</div>
                     <p className="preserve">
                       {detail.question.evaluation_comments || "Not supplied."}
                     </p>
