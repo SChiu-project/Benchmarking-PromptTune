@@ -20,7 +20,8 @@
     "cms:import": "tsx scripts/import-cms-export.ts",
     "cms:export": "tsx scripts/export-cms-format.ts",
     "preference:compare": "tsx scripts/preference-compare.ts",
-    "package:github": "python3 scripts/package-github.py"
+    "package:github": "python3 scripts/package-github.py",
+    "test:ui": "playwright test"
   },
   "dependencies": {
     "csv-parse": "7.0.3",
